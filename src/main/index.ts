@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { isDev } from './utils/env.js'
 import { registerStorageIPC } from './ipc/storage.js'
 import { registerAppIPC } from './ipc/app.js'
+import { seedSRD2024Data } from './services/srd2024-seeder.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -51,7 +52,15 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Initialize SRD 2024 reference data
+  try {
+    const result = await seedSRD2024Data()
+    console.log('[SRD2024]', result.message)
+  } catch (error) {
+    console.error('[SRD2024] Erreur lors de l\'initialisation:', error)
+  }
+
   // Register IPC handlers
   registerStorageIPC()
   registerAppIPC()

@@ -76,6 +76,7 @@ export function PlayerCharacterPage() {
         onClose={handleCloseModal}
         initialCharacter={editingCharacter ?? undefined}
         onSaved={handleSaved}
+        onDuplicate={() => handleDuplicateCharacter(editingCharacter!)}
       />
     </div>
   )

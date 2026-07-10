@@ -19,7 +19,8 @@
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@shared/data/*": ["src/shared/data/*"]
     },
     "outDir": "dist/main",
     "rootDir": "src/main",
@@ -28,5 +29,5 @@
     "sourceMap": true
   },
   "include": ["src/main/**/*"],
-  "exclude": ["src/main/**/*.test.ts", "src/shared/components/ui/**/*", "src/shared/components/PlaceholderPage.tsx"]
+  "exclude": ["src/main/**/*.test.ts", "src/shared/components/ui/**/*", "src/shared/components/PlaceholderPage.tsx", "src/features/**/*"]
 }

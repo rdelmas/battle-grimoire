@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { 
-  X, Save, User, Sword, Heart, Brain, BookOpen, Star, 
+  Save, User, Sword, Heart, Brain, BookOpen, Star, 
   Plus, Trash2, Zap, Sparkles, Target,
   Copy, AlertTriangle
 } from 'lucide-react'
@@ -22,12 +22,19 @@ import {
   getAbilityModifier,
 } from '../../types/character'
 import { cn } from '@/shared/utils/cn'
+import { 
+  getAllSpecies, 
+  getAllBackgrounds, 
+  getAllClasses, 
+  getSubclasses
+} from '@/shared/data'
 
 interface CharacterBuilderModalProps {
   isOpen: boolean
   onClose: () => void
   initialCharacter?: PlayerCharacter
   onSaved: (character: PlayerCharacter) => void
+  onDuplicate?: () => void
 }
 
 const SECTIONS = [
@@ -49,6 +56,20 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
 
   // Validation state
   const isValid = form.isValid
+
+  // Memoized data from SRD2024
+  const speciesList = useMemo(() => getAllSpecies(), [])
+  const backgroundList = useMemo(() => getAllBackgrounds(), [])
+  const classList = useMemo(() => getAllClasses(), [])
+  
+  // Get subclasses for the selected class
+  const availableSubclasses = useMemo(() => {
+    if (!form.character.class_name) return []
+    return getSubclasses(form.character.class_name)
+  }, [form.character.class_name])
+  
+  // Check if subclass should be enabled (class selected && level 3+)
+  const isSubclassEnabled = form.character.class_name && form.character.level >= 3
 
   // Handlers
   const handleSave = async () => {
@@ -88,6 +109,7 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
   // ===== SECTION 1: IDENTITÉ =====
   function renderIdentitySection() {
     const c = form.character
+
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -118,46 +140,64 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
               className="w-full"
             />
           </div>
-          <Input
-            label="Espèce"
+          <Select
+            label="Espèce (SRD 2024)"
             value={c.species}
             onChange={e => form.setField('species', e.target.value)}
-            placeholder="Ex: Humain, Elfe, Halfelin"
-          />
-          <Input
-            label="Historique"
+          >
+            <option value="">— Choisir une espèce —</option>
+            {speciesList.map(species => (
+              <option key={species.id} value={species.name}>
+                {species.name} {species.isCustom ? '(Personnalisée)' : ''}
+              </option>
+            ))}
+          </Select>
+          <Select
+            label="Historique (SRD 2024)"
             value={c.background}
             onChange={e => form.setField('background', e.target.value)}
-            placeholder="Ex: Soldat, Acolyte"
-          />
-          <Input
-            label="Sous-classe"
-            value={c.subclass_name ?? ''}
-            onChange={e => form.setField('subclass_name', e.target.value || undefined)}
-            placeholder="Ex: Champion, Evocateur (niv. 3+)"
-          />
+          >
+            <option value="">— Choisir un historique —</option>
+            {backgroundList.map(bg => (
+              <option key={bg.id} value={bg.name}>
+                {bg.name} {bg.isCustom ? '(Personnalisé)' : ''}
+              </option>
+            ))}
+          </Select>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select
-            label="Classe *"
+            label="Classe * (SRD 2024)"
             value={c.class_name}
             onChange={e => form.setField('class_name', e.target.value)}
             error={form.errors.class_name}
             required
           >
             <option value="">Classe *</option>
-            <option value="Barbarian">Barbare</option>
-            <option value="Bard">Barde</option>
-            <option value="Cleric">Clerc</option>
-            <option value="Druid">Druide</option>
-            <option value="Fighter">Guerrier</option>
-            <option value="Monk">Moine</option>
-            <option value="Paladin">Paladin</option>
-            <option value="Ranger">Rôdeur</option>
-            <option value="Rogue">Voleur</option>
-            <option value="Sorcerer">Ensorceleur</option>
-            <option value="Warlock">Démoniste</option>
-            <option value="Wizard">Magicien</option>
+            {classList.map(cls => (
+              <option key={cls.id} value={cls.id}>
+                {cls.name}
+              </option>
+            ))}
+          </Select>
+          <Select
+            label="Sous-classe"
+            value={c.subclass_name ?? ''}
+            onChange={e => form.setField('subclass_name', e.target.value || undefined)}
+            disabled={!isSubclassEnabled}
+          >
+            <option value="">— Aucune —</option>
+            {!isSubclassEnabled && c.level < 3 && (
+              <option value="" disabled>Disponible au niveau 3</option>
+            )}
+            {!isSubclassEnabled && c.level >= 3 && availableSubclasses.length === 0 && (
+              <option value="" disabled>Pas de sous-classe pour cette classe</option>
+            )}
+            {availableSubclasses.map(subclass => (
+              <option key={subclass.id} value={subclass.name}>
+                {subclass.name}
+              </option>
+            ))}
           </Select>
         </div>
       </div>
@@ -917,80 +957,66 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
 
   if (!isOpen) return null
 
-  const modalContent = (
-    <div className="flex flex-col h-full max-h-[90vh] w-full max-w-7xl">
-      {/* Modal Header */}
-      <div className="flex items-center justify-between p-4 border-b border-border-main">
-        <h2 className="text-xl font-semibold text-text-main font-serif">
-          {initialCharacter ? 'Modifier Personnage' : 'Créer un Personnage'}
-        </h2>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <X className="h-5 w-5" />
-        </Button>
-      </div>
-
-      {/* Main Content: 2 columns */}
-      <div className="flex-1 overflow-hidden flex">
-        {/* Colonne Gauche: Formulaire (2/3) */}
-        <div className="w-full lg:w-2/3 flex flex-col overflow-hidden z-10">
-          {/* Navigation des sections */}
-          <div className="flex flex-wrap gap-1 p-3 border-b border-border-main bg-bg-surface/50">
-            {SECTIONS.map(({ id, label, icon: Icon }) => (
-              <Button
-                key={id}
-                variant={activeSection === id ? 'primary' : 'ghost'}
-                size="sm"
-                onClick={() => setActiveSection(id)}
-                className="gap-1.5"
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-              </Button>
-            ))}
-          </div>
-
-          {/* Contenu de la section active */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-6" style={{ maxHeight: 'calc(90vh - 200px)' }}>
-            {renderSection(activeSection)}
-          </div>
-        </div>
-
-        {/* Colonne Droite: Prévisualisation (1/3) */}
-        <div className="hidden lg:block w-80 flex-shrink-0 z-0 overflow-hidden">
-          <div className="h-full overflow-y-auto max-h-[calc(90vh-120px)]">
-            {renderPreview()}
-          </div>
-        </div>
-      </div>
-
-      {/* Footer Modal */}
-      <div className="flex items-center justify-end gap-3 p-4 border-t border-border-main bg-bg-surface/50">
-        <Button variant="ghost" onClick={onClose}>Annuler</Button>
-        <Button variant="secondary" onClick={handleDuplicate}>
-          <Copy className="h-4 w-4 mr-1" /> Dupliquer
-        </Button>
-        <Button 
-          onClick={handleSave} 
-          disabled={!isValid || form.isSaving}
-          loading={form.isSaving}
-        >
-          <Save className="h-4 w-4 mr-1" />
-          {initialCharacter ? 'Enregistrer' : 'Créer'}
-        </Button>
-      </div>
-    </div>
-  )
-
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       size="full"
-      showCloseButton={false}
+      title={initialCharacter ? 'Modifier Personnage' : 'Créer un Personnage'}
       closeOnOverlayClick={false}
       closeOnEscape={false}
     >
-      {modalContent}
+      <div className="flex flex-col h-full w-full max-w-7xl">
+        {/* Main Content: 2 columns */}
+        <div className="flex-1 overflow-hidden flex">
+          {/* Colonne Gauche: Formulaire (2/3) */}
+          <div className="w-full lg:w-2/3 flex flex-col overflow-hidden z-10">
+            {/* Navigation des sections */}
+            <div className="flex flex-wrap gap-1 p-3 border-b border-border-main bg-bg-surface/50">
+              {SECTIONS.map(({ id, label, icon: Icon }) => (
+                <Button
+                  key={id}
+                  variant={activeSection === id ? 'primary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setActiveSection(id)}
+                  className="gap-1.5"
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </Button>
+              ))}
+            </div>
+
+            {/* Contenu de la section active */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-6" style={{ maxHeight: 'calc(90vh - 200px)' }}>
+              {renderSection(activeSection)}
+            </div>
+          </div>
+
+          {/* Colonne Droite: Prévisualisation (1/3) */}
+          <div className="hidden lg:block w-80 flex-shrink-0 z-0 overflow-hidden">
+            <div className="h-full overflow-y-auto max-h-[calc(90vh-120px)]">
+              {renderPreview()}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Modal */}
+        <div className="flex items-center justify-end gap-3 p-4 border-t border-border-main bg-bg-surface/50 flex-shrink-0">
+          <Button variant="ghost" onClick={onClose}>Annuler</Button>
+          <Button variant="secondary" onClick={handleDuplicate}>
+            <Copy className="h-4 w-4 mr-1" /> Dupliquer
+          </Button>
+          <Button 
+            onClick={handleSave} 
+            disabled={!isValid || form.isSaving}
+            loading={form.isSaving}
+          >
+            <Save className="h-4 w-4 mr-1" />
+            {initialCharacter ? 'Enregistrer' : 'Créer'}
+          </Button>
+        </div>
+      </div>
     </Modal>
   )
 }

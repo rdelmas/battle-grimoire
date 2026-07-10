@@ -65,10 +65,10 @@ export function Modal({
         onClick={handleOverlayClick}
         aria-hidden="true"
       />
-      <div className="flex min-h-full items-start justify-center p-4 z-50">
+      <div className="flex min-h-full items-start justify-center p-4">
         <div
           className={cn(
-            'w-full bg-bg-card border border-border-main rounded-xl shadow-2xl overflow-hidden animate-slide-up',
+            'w-full bg-bg-card border border-border-main rounded-xl shadow-2xl overflow-hidden animate-slide-up flex flex-col z-50',
             sizes[size]
           )}
         >
@@ -90,7 +90,7 @@ export function Modal({
               )}
             </div>
           )}
-          <div className="p-6 overflow-y-auto max-h-[calc(100vh-8rem)]">{children}</div>
+          <div className="flex-1 overflow-y-auto p-6 min-h-0">{children}</div>
         </div>
       </div>
     </div>
