@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Colors */
+  --color-bg-main: #030712;
+  --color-bg-surface: #111827;
+  --color-bg-card: #0f172a;
+  --color-border-main: #1f2937;
+  --color-border-hover: #334155;
+  --color-text-main: #f3f4f6;
+  --color-text-muted: #9ca3af;
+  --color-text-dark: #52525b;
+  
+  --color-amber-main: #fbbf24;
+  --color-amber-dark: #f59e0b;
+  --color-amber-glow: rgba(245, 158, 11, 0.15);
+  
+  --color-rarity-common: #9ca3af;
+  --color-rarity-uncommon: #22c55e;
+  --color-rarity-rare: #3b82f6;
+  --color-rarity-very-rare: #a855f7;
+  --color-rarity-legendary: #f97316;
+  --color-rarity-artifact: #eab308;
+
+  /* Fonts */
+  --font-serif: "Cinzel", "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", "Inter", "DM Sans", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  /* Shadows */
+  --shadow-glow-amber: 0 0 15px rgba(245, 158, 11, 0.4);
+  --shadow-glow-amber-sm: 0 0 8px rgba(245, 158, 11, 0.2);
+
+  /* Background images */
+  --background-image-magic-glow: radial-gradient(ellipse at center, rgba(168, 85, 247, 0.05) 0%, transparent 70%);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border-main);
+  }
+
+  body {
+    background-color: var(--color-bg-main);
+    color: var(--color-text-main);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-amber-main focus:ring-offset-2 focus:ring-offset-bg-main;
+  }
+
+  .glow-amber-hover {
+    @apply transition-all duration-300 hover:shadow-glow-amber;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { 
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to { 
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
