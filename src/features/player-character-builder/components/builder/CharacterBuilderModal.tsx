@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { 
   Save, User, Sword, Heart, Brain, BookOpen, Star, 
   Plus, Trash2, Zap, Sparkles, Target,
@@ -53,6 +53,18 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
   const calculations = useCharacterCalculations(form.character)
   const [activeSection, setActiveSection] = useState<SectionId>('identity')
   const [showPreview] = useState(true)
+
+  // Track previous initialCharacter to avoid infinite loop
+  const prevInitialCharacterRef = useRef<PlayerCharacter | undefined>(initialCharacter)
+
+  // Reset form when initialCharacter changes (e.g., when editing a different character)
+  useEffect(() => {
+    // Only reset if initialCharacter actually changed (by reference)
+    if (prevInitialCharacterRef.current !== initialCharacter) {
+      prevInitialCharacterRef.current = initialCharacter
+      form.reset(initialCharacter)
+    }
+  }, [initialCharacter, form])
 
   // Validation state
   const isValid = form.isValid
@@ -112,6 +124,7 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
 
     return (
       <div className="space-y-6">
+        {/* Nom du personnage & Joueur */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
             label="Nom du personnage *"
@@ -127,19 +140,19 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
             placeholder="Ex: Thomas"
           />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-text-muted mb-1.5">Niveau *</label>
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              value={c.level}
-              onChange={e => form.setField('level', parseInt(e.target.value) || 1)}
-              error={form.errors.level}
-              className="w-full"
-            />
-          </div>
+
+        {/* Niveau, Espèce, Historique - 3 colonnes égales */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Input
+            label="Niveau *"
+            type="number"
+            min={1}
+            max={20}
+            value={c.level}
+            onChange={e => form.setField('level', parseInt(e.target.value) || 1)}
+            error={form.errors.level}
+            placeholder="1–20"
+          />
           <Select
             label="Espèce (SRD 2024)"
             value={c.species}
@@ -165,6 +178,8 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
             ))}
           </Select>
         </div>
+
+        {/* Classe & Sous-classe - 2 colonnes égales */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select
             label="Classe * (SRD 2024)"

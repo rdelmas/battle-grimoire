@@ -8,6 +8,7 @@ import {
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Power,
 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '@/shared/utils/cn'
@@ -87,9 +88,21 @@ export function AppLayout() {
 
         {/* Footer info */}
         <div className={cn('p-4 border-t border-border-main', sidebarCollapsed && 'hidden')}>
-          <p className="text-xs text-text-dark text-center">
+          <p className="text-xs text-text-dark text-center mb-4">
             Battle Grimoire v0.1.0
           </p>
+          
+          {/* Quit button */}
+          <button
+            id="quit-app-sidebar"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium text-text-muted hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors duration-200 focus-ring"
+            aria-label="Quitter l'application"
+            title="Quitter"
+            onClick={() => window.api?.app?.quit()}
+          >
+            <Power className="h-4 w-4" aria-hidden="true" />
+            <span>Quitter</span>
+          </button>
         </div>
       </aside>
 

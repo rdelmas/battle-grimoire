@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { CharacterList } from './components/CharacterList'
 import { CharacterBuilderModal } from './components/builder/CharacterBuilderModal'
-import { useCharacterForm } from './hooks/useCharacterForm'
 import type { PlayerCharacter } from './types/character'
 
 export function PlayerCharacterPage() {
@@ -34,17 +33,22 @@ export function PlayerCharacterPage() {
   }
 
   const handleDuplicateCharacter = async (character: PlayerCharacter) => {
-    // Créer une copie temporaire pour la duplication
-    const tempForm = useCharacterForm(character)
-    await tempForm.duplicate()
+    // Dupliquer directement via l'API de stockage sans utiliser de hook
+    const duplicated: PlayerCharacter = {
+      ...character,
+      id: crypto.randomUUID(),
+      character_name: `${character.character_name} - Copie`,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    }
+    await window.api.storage.put('characters', duplicated)
     await loadCharacters()
   }
 
   const handleDeleteCharacter = async (character: PlayerCharacter) => {
     if (!confirm(`Supprimer "${character.character_name}" ? Cette action est irréversible.`)) return
     
-    const tempForm = useCharacterForm(character)
-    await tempForm.delete()
+    await window.api.storage.delete('characters', character.id)
     await loadCharacters()
   }
 

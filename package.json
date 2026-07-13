@@ -20,7 +20,7 @@
   "dependencies": {
     "@types/uuid": "^10.0.0",
     "clsx": "^2.1.1",
-    "electron": "43.0.0",
+    "electron": "^43.0.0",
     "electron-store": "^11.0.2",
     "idb": "^8.0.3",
     "lucide-react": "^1.23.0",
