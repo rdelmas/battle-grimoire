@@ -2,8 +2,9 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { 
   Save, User, Sword, Heart, Brain, BookOpen, Star, 
   Plus, Trash2, Zap, Sparkles, Target,
-  Copy, AlertTriangle
+  Copy, AlertTriangle, Wrench, PlusCircle, Wand2
 } from 'lucide-react'
+import { getClassIcon } from '../../utils/classIcons'
 import { Modal } from '@/shared/components/ui/Modal'
 import { Button } from '@/shared/components/ui/Button'
 import { Input } from '@/shared/components/ui/Input'
@@ -12,15 +13,30 @@ import { Card, CardHeader, CardContent } from '@/shared/components/ui/Card'
 import { Badge } from '@/shared/components/ui/Badge'
 import { useCharacterForm } from '../../hooks/useCharacterForm'
 import { useCharacterCalculations } from '../../hooks/useCharacterCalculations'
-import type { PlayerCharacter, SkillName, WeaponMasteryProperty, SpellcastingAbility } from '../../types/character'
+import type { PlayerCharacter, SkillName, WeaponMasteryProperty, SpellcastingAbility, AbilityScores, SpellcastingSource, PreparedSpell } from '../../types/character'
 import { 
   ALL_SKILLS, 
   ALL_ABILITIES, 
   SKILL_ABILITY_MAP, 
   WEAPON_MASTERY_PROPERTIES, 
   WEAPON_MASTERY_LABELS,
-  getAbilityModifier,
 } from '../../types/character'
+import { 
+  autoConfigureSpellcasting, 
+  createPrimarySpellcastingSource,
+  createFeatSpellcastingSource,
+  createRaceSpellcastingSource,
+  createItemSpellcastingSource,
+  combineSpellSlots,
+  getSpellSaveDC,
+  getSpellAttackBonus,
+  getMaxPreparedSpellsForSource,
+  SPELLCASTING_FEATS,
+  RACE_SPELLCASTING_CONFIG,
+  type SpellcastingFeatConfig,
+  type ItemSpellcastingInput
+} from '../../utils/spellcasting'
+import { SRD2024_SPELLS } from '@/shared/data/srd2024-spells'
 import { cn } from '@/shared/utils/cn'
 import { 
   getAllSpecies, 
@@ -28,6 +44,150 @@ import {
   getAllClasses, 
   getSubclasses
 } from '@/shared/data'
+
+/**
+ * Obtient tous les sorts disponibles pour une source d'incantation
+ * (classe, don, race, objet)
+ */
+function getAvailableSpellsForSource(source: SpellcastingSource, characterClass: string): typeof SRD2024_SPELLS {
+  // Pour les sources de type classe, filtrer par la classe du personnage
+  if (source.type === 'class') {
+    return SRD2024_SPELLS.filter(spell => 
+      spell.classes?.includes(characterClass.toLowerCase())
+    )
+  }
+  // Pour les dons (Magic Initiate, etc.), le don définit sa propre liste
+  if (source.type === 'feat') {
+    // Les dons comme Magic Initiate permettent de choisir n'importe quelle liste
+    // On retourne tous les sorts pour laisser l'utilisateur choisir
+    return SRD2024_SPELLS
+  }
+  // Pour les races et objets, on retourne tous les sorts (saisie libre assistée)
+  return SRD2024_SPELLS
+}
+
+/**
+ * Composant sélecteur de sort avec filtre depuis la BDD SRD
+ * Remplace la saisie libre par une liste déroulante filtrée
+ * Structure alignée sur le composant Select pour cohérence visuelle dans la grille
+ */
+function SpellSelector({ 
+  spell, 
+  source, 
+  characterClass, 
+  onChange 
+}: { 
+  spell: PreparedSpell
+  source: SpellcastingSource
+  characterClass: string
+  onChange: (spell: PreparedSpell) => void
+}) {
+  // Obtenir les sorts disponibles pour cette source
+  const availableSpells = getAvailableSpellsForSource(source, characterClass)
+  
+  // Filtrer par niveau du sort sélectionné
+  const filteredSpells = availableSpells.filter(s => s.level === spell.level)
+  
+  // Trouver le sort correspondant dans la BDD pour auto-remplissage
+  const matchedSpell = availableSpells.find(s => s.name.toLowerCase() === spell.name.toLowerCase())
+  
+  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedName = e.target.value
+    if (selectedName === '__custom__') {
+      // Mode saisie libre - on garde le nom actuel mais on permet l'édition
+      return
+    }
+    const selectedSpell = availableSpells.find(s => s.name === selectedName)
+    if (selectedSpell) {
+      // Auto-remplir tous les champs depuis la BDD
+      onChange({
+        ...spell,
+        name: selectedSpell.name,
+        level: selectedSpell.level,
+        casting_time: selectedSpell.castingTime,
+        range: selectedSpell.range,
+        components: selectedSpell.components,
+        concentration: selectedSpell.concentration,
+        description: selectedSpell.description,
+      })
+    }
+  }
+
+  const handleCustomInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const customName = e.target.value
+    // Si l'utilisateur tape un nom qui existe dans la BDD, proposer l'auto-remplissage
+    const matched = availableSpells.find(s => s.name.toLowerCase() === customName.toLowerCase())
+    if (matched) {
+      onChange({
+        ...spell,
+        name: matched.name,
+        level: matched.level,
+        casting_time: matched.castingTime,
+        range: matched.range,
+        components: matched.components,
+        concentration: matched.concentration,
+        description: matched.description,
+      })
+    } else {
+      // Sinon juste mettre à jour le nom
+      onChange({ ...spell, name: customName })
+    }
+  }
+
+  // Déterminer si le sort actuel correspond à un sort de la BDD
+  const isCustomSpell = !matchedSpell
+
+  // Structure IDENTIQUE au composant Select : wrapper w-full > label + select/input + badge
+  // Padding py-2.5 pour alignement parfait avec Select/Input
+  return (
+    <div className="w-full">
+      <label className="block text-sm font-medium text-text-muted mb-1.5">Nom</label>
+      <div className="relative">
+        {isCustomSpell ? (
+          // Mode saisie libre avec datalist pour autocomplétion
+          <>
+            <input
+              type="text"
+              list={`spell-suggestions-${spell.level}`}
+              value={spell.name}
+              onChange={handleCustomInputChange}
+              placeholder="Nom du sort"
+              className="w-full px-3 py-2.5 bg-bg-surface border border-border-main rounded-lg text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 pr-20"
+            />
+            <datalist id={`spell-suggestions-${spell.level}`}>
+              {filteredSpells.map(s => (
+                <option key={s.name} value={s.name} />
+              ))}
+              <option value="__custom__">✏️ Autre (personnalisé)</option>
+            </datalist>
+          </>
+        ) : (
+          // Mode sélection depuis la BDD - select natif avec MÊMES classes que Select
+          <select
+            value={spell.name}
+            onChange={handleSelectChange}
+            className="w-full px-3 py-2.5 bg-bg-surface border border-border-main rounded-lg text-text-main focus:outline-none focus:ring-2 focus:ring-amber-main focus:border-amber-main appearance-none pr-20"
+          >
+            <option value="">— Choisir un sort —</option>
+            {filteredSpells.map(s => (
+              <option key={s.name} value={s.name}>
+                {s.name} ({s.school})
+              </option>
+            ))}
+            <option value="__custom__">✏️ Autre (personnalisé)</option>
+          </select>
+        )}
+        
+        {/* Indicateur visuel si le sort vient de la BDD - même positionnement */}
+        {matchedSpell && (
+          <div className="absolute top-1/2 right-3 -translate-y-1/2 text-xs text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded pointer-events-none">
+            ✓ SRD
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 interface CharacterBuilderModalProps {
   isOpen: boolean
@@ -37,22 +197,45 @@ interface CharacterBuilderModalProps {
   onDuplicate?: () => void
 }
 
-const SECTIONS = [
-  { id: 'identity', label: 'Identité', icon: User },
-  { id: 'abilities', label: 'Attributs', icon: Target },
-  { id: 'skills', label: 'Compétences', icon: Brain },
-  { id: 'vitals', label: 'Vitales', icon: Heart },
-  { id: 'feats', label: 'Dons/Armes', icon: Star },
-  { id: 'spells', label: 'Magie', icon: BookOpen },
+// Sections de navigation - l'icône pour "feats" sera dynamique selon la classe sélectionnée
+const getSections = (className: string) => [
+  { id: 'identity' as const, label: 'Identité', icon: User },
+  { id: 'abilities' as const, label: 'Attributs', icon: Target },
+  { id: 'skills' as const, label: 'Compétences', icon: Brain },
+  { id: 'vitals' as const, label: 'Vitales', icon: Heart },
+  { id: 'feats' as const, label: 'Dons/Armes', icon: getClassIcon(className) || Sword },
+  { id: 'spells' as const, label: 'Magie', icon: BookOpen },
 ] as const
 
-type SectionId = typeof SECTIONS[number]['id']
+type SectionId = 'identity' | 'abilities' | 'skills' | 'vitals' | 'feats' | 'spells'
 
 export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSaved }: CharacterBuilderModalProps) {
   const form = useCharacterForm(initialCharacter)
   const calculations = useCharacterCalculations(form.character)
   const [activeSection, setActiveSection] = useState<SectionId>('identity')
   const [showPreview] = useState(true)
+
+  // État local pour l'UI de la section sorts (doit être au niveau du composant pour respecter les Rules of Hooks)
+  const [showAddSourceModal, setShowAddSourceModal] = useState(false)
+  const [selectedFeatForSource, setSelectedFeatForSource] = useState<SpellcastingFeatConfig | null>(null)
+  const [selectedFeatAbility, setSelectedFeatAbility] = useState<SpellcastingAbility>('int')
+  
+  // États pour les nouveaux modaux Race et Objet
+  const [showAddRaceSourceModal, setShowAddRaceSourceModal] = useState(false)
+  const [selectedRaceForSource, setSelectedRaceForSource] = useState<string>('')
+  const [selectedRaceCantrip, setSelectedRaceCantrip] = useState<string>('')
+  
+  const [showAddItemSourceModal, setShowAddItemSourceModal] = useState(false)
+  const [itemSourceForm, setItemSourceForm] = useState<ItemSpellcastingInput>({
+    name: '',
+    ability: 'int',
+    cantripsKnown: 0,
+    preparedSpells: [],
+    alwaysPrepared: [],
+    charges: 1,
+    rechargeType: 'long',
+    spellcastingLevel: 1,
+  })
 
   // Track previous initialCharacter to avoid infinite loop
   const prevInitialCharacterRef = useRef<PlayerCharacter | undefined>(initialCharacter)
@@ -69,6 +252,30 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
   // Validation state
   const isValid = form.isValid
 
+  // Auto-configuration de la magie quand la classe change
+  useEffect(() => {
+    const c = form.character
+    if (c.class_name) {
+      const config = autoConfigureSpellcasting(
+        c.class_name,
+        c.level,
+        c.abilities as unknown as Record<string, number>,
+        c.spellcasting_ability
+      )
+      
+      // Seulement appliquer si l'auto-config suggère des changements
+      if (config.spellcasting_ability !== c.spellcasting_ability) {
+        form.setField('spellcasting_ability', config.spellcasting_ability)
+      }
+      if (JSON.stringify(config.spell_slots) !== JSON.stringify(c.spell_slots)) {
+        form.setField('spell_slots', config.spell_slots)
+      }
+      if (config.cantrips_known !== c.cantrips_known) {
+        form.setField('cantrips_known', config.cantrips_known)
+      }
+    }
+  }, [form.character.class_name, form.character.level, form.character.abilities, form])
+
   // Memoized data from SRD2024
   const speciesList = useMemo(() => getAllSpecies(), [])
   const backgroundList = useMemo(() => getAllBackgrounds(), [])
@@ -82,6 +289,58 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
   
   // Check if subclass should be enabled (class selected && level 3+)
   const isSubclassEnabled = form.character.class_name && form.character.level >= 3
+
+  // Memoized skills grouped by ability (static data, never changes)
+  const skillsByAbility = useMemo(() => {
+    const groups: Record<keyof AbilityScores, SkillName[]> = {
+      str: [],
+      dex: [],
+      con: [],
+      int: [],
+      wis: [],
+      cha: [],
+    }
+    ALL_SKILLS.forEach(skill => {
+      const ability = SKILL_ABILITY_MAP[skill]
+      groups[ability].push(skill)
+    })
+    return groups
+  }, [])
+
+  // Ordre d'affichage des attributs (FOR, DEX, CON, INT, SAG, CHA)
+  const abilityOrder: (keyof AbilityScores)[] = ['str', 'dex', 'con', 'int', 'wis', 'cha']
+
+  // Labels complets des compétences
+  const skillLabels: Record<SkillName, string> = {
+    acrobatics: 'Acrobaties',
+    animal_handling: 'Dressage',
+    arcana: 'Arcanes',
+    athletics: 'Athlétisme',
+    deception: 'Tromperie',
+    history: 'Histoire',
+    insight: 'Perspicacité',
+    intimidation: 'Intimidation',
+    investigation: 'Investigation',
+    medicine: 'Médecine',
+    nature: 'Nature',
+    perception: 'Perception',
+    performance: 'Représentation',
+    persuasion: 'Persuasion',
+    religion: 'Religion',
+    sleight_of_hand: 'Prestidigitation',
+    stealth: 'Discrétion',
+    survival: 'Survie',
+  }
+
+  // Mapping abrégé des attributs pour l'affichage
+  const abilityLabels: Record<keyof AbilityScores, string> = {
+    str: 'FOR',
+    dex: 'DEX',
+    con: 'CON',
+    int: 'INT',
+    wis: 'SAG',
+    cha: 'CHA',
+  }
 
   // Handlers
   const handleSave = async () => {
@@ -231,11 +490,11 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
           <Target className="h-5 w-5 text-amber-main" />
           <div>
             <p className="font-medium text-text-main">Bonus de Maîtrise: <span className="text-amber-main">+{proficiencyBonus}</span></p>
-            <p className="text-sm text-text-muted">Calculé automatiquement selon le niveau (RG-8-1-01)</p>
+            <p className="text-sm text-text-muted">Calculé automatiquement selon le niveau</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-4">
           {ALL_ABILITIES.map(ability => {
             const score = c.abilities[ability]
             const mod = abilityModifiers[ability]
@@ -253,30 +512,28 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
                   <div className="text-xs font-medium text-text-muted uppercase tracking-wider mb-1">
                     {fullLabels[ability]} ({labels[ability]})
                   </div>
-                  <div className="flex items-center justify-center gap-2 mb-2">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-8 w-8 p-0"
+                  <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2 mb-2">
+                    <button 
+                      type="button"
+                      className="h-8 w-8 p-0 flex-shrink-0 text-text-main bg-bg-surface border border-border-main rounded-lg hover:bg-amber-main/10 hover:border-amber-main/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => form.setAbility(ability, score - 1)}
                       disabled={score <= 1}
-                    >−</Button>
+                    >−</button>
                     <Input
                       type="number"
                       min={1}
                       max={30}
                       value={score}
                       onChange={e => form.setAbility(ability, parseInt(e.target.value) || 1)}
-                      className="w-20 text-center text-2xl font-bold font-serif bg-transparent border-none p-0"
+                      className="w-full max-w-24 text-center text-2xl font-bold font-serif bg-transparent border-none p-0 mx-auto"
                       error={form.errors.abilities?.[ability]}
                     />
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-8 w-8 p-0"
+                    <button 
+                      type="button"
+                      className="h-8 w-8 p-0 flex-shrink-0 text-text-main bg-bg-surface border border-border-main rounded-lg hover:bg-amber-main/10 hover:border-amber-main/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={() => form.setAbility(ability, score + 1)}
                       disabled={score >= 30}
-                    >+</Button>
+                    >+</button>
                   </div>
                   <div className={cn(
                     'text-3xl font-bold font-serif',
@@ -305,7 +562,7 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
     )
   }
 
-  // ===== SECTION 3: COMPÉTENCES =====
+// ===== SECTION 3: COMPÉTENCES =====
   function renderSkillsSection() {
     const c = form.character
     const skillModifiers = calculations.skills.modifiers
@@ -318,76 +575,100 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
       { value: 'expertise', label: 'E', desc: 'Expertise (+2×PB)' },
     ] as const
 
+    const fullAbilityLabels: Record<keyof AbilityScores, string> = {
+      str: 'Force',
+      dex: 'Dextérité',
+      con: 'Constitution',
+      int: 'Intelligence',
+      wis: 'Sagesse',
+      cha: 'Charisme',
+    }
+
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-4 p-3 bg-blue-500/5 border border-blue-500/20 rounded-lg">
           <Brain className="h-5 w-5 text-blue-500" />
           <div>
             <p className="font-medium text-text-main">Perception Passive: <span className="text-blue-500">{calculations.skills.passivePerception}</span></p>
-            <p className="text-sm text-text-muted">10 + modificateur Perception final (RG-8-1-06)</p>
+            <p className="text-sm text-text-muted">10 + modificateur Perception final</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {ALL_SKILLS.map(skill => {
-            const ability = SKILL_ABILITY_MAP[skill]
-            const abilityMod = abilityModifiers[ability]
-            const proficiency = c.skills[skill]
-            const totalMod = skillModifiers[skill]
+        <div className="space-y-6">
+          {abilityOrder.map(ability => {
+            const skills = skillsByAbility[ability]
+            if (skills.length === 0) return null
 
-            const skillLabels: Record<SkillName, string> = {
-              acrobatics: 'Acrobaties (DEX)',
-              animal_handling: 'Dressage (SAG)',
-              arcana: 'Arcanes (INT)',
-              athletics: 'Athlétisme (FOR)',
-              deception: 'Tromperie (CHA)',
-              history: 'Histoire (INT)',
-              insight: 'Perspicacité (SAG)',
-              intimidation: 'Intimidation (CHA)',
-              investigation: 'Investigation (INT)',
-              medicine: 'Médecine (SAG)',
-              nature: 'Nature (INT)',
-              perception: 'Perception (SAG)',
-              performance: 'Représentation (CHA)',
-              persuasion: 'Persuasion (CHA)',
-              religion: 'Religion (INT)',
-              sleight_of_hand: 'Prestidigitation (DEX)',
-              stealth: 'Discrétion (DEX)',
-            }
+            const abilityMod = abilityModifiers[ability]
+            const abilityLabel = abilityLabels[ability]
 
             return (
-              <Card key={skill} className={cn(
-                'p-3',
-                proficiency === 'expertise' && 'bg-amber-main/10 border-amber-main/30',
-                proficiency === 'proficient' && 'bg-amber-main/5 border-amber-main/20'
-              )}>
-                <div className="flex items-center justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-text-main truncate pr-2">
-                      {skillLabels[skill]}
-                    </div>
-                    <div className="text-xs text-text-muted">
-                      Mod {ability}: {abilityMod >= 0 ? '+' : ''}{abilityMod} | PB: +{proficiencyBonus}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 ml-2">
+              <Card key={ability} className="bg-bg-surface/50 border-border-main/50">
+                <CardHeader className="pb-2 bg-amber-main/5 border-b border-amber-main/20">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-text-main flex items-center gap-2">
+                      <span className="text-amber-main font-mono text-sm">{abilityLabel}</span>
+                      <span className="text-text-muted text-sm">{fullAbilityLabels[ability]}</span>
+                    </h4>
                     <div className={cn(
-                      'text-xl font-bold font-serif w-12 text-right',
-                      totalMod >= 0 ? 'text-amber-main' : 'text-red-500'
+                      'text-xl font-bold font-serif px-3 py-0.5 rounded bg-bg-surface border border-border-main',
+                      abilityMod >= 0 ? 'text-amber-main' : 'text-red-500'
                     )}>
-                      {totalMod >= 0 ? '+' : ''}{totalMod}
+                      {abilityMod >= 0 ? '+' : ''}{abilityMod}
                     </div>
-                    <Select
-                      value={proficiency}
-                      onChange={e => form.setSkill(skill, e.target.value as 'none' | 'proficient' | 'expertise')}
-                      className="w-20"
-                    >
-                      {proficiencyOptions.map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
-                    </Select>
                   </div>
-                </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {/* Grille 3 colonnes pour les compétences */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {skills.map(skill => {
+                      const proficiency = c.skills[skill]
+                      const totalMod = skillModifiers[skill]
+
+                      return (
+                        <div
+                          key={skill}
+                          className={cn(
+                            'flex flex-col gap-2 p-3 rounded-lg transition-colors',
+                            proficiency === 'expertise' && 'bg-amber-main/10 border border-amber-main/20',
+                            proficiency === 'proficient' && 'bg-amber-main/5 border border-amber-main/10',
+                            proficiency === 'none' && 'bg-bg-surface/50 border border-border-main/50 hover:border-border-main/50'
+                          )}
+                        >
+                          {/* Ligne 1: Nom de la compétence + Modificateur total */}
+                          <div className="flex items-center justify-between">
+                            <div className="font-medium text-text-main min-w-0">{skillLabels[skill]}</div>
+                            <div className={cn(
+                              'text-xl font-bold font-serif shrink-0',
+                              totalMod >= 0 ? 'text-amber-main' : 'text-red-500'
+                            )}>
+                              {totalMod >= 0 ? '+' : ''}{totalMod}
+                            </div>
+                          </div>
+                          
+                          {/* Ligne 2: Détail du calcul */}
+                          <div className="text-xs text-text-muted font-mono">
+                            {(() => {
+                              const profValue = proficiency === 'expertise' ? proficiencyBonus * 2 : proficiency === 'proficient' ? proficiencyBonus : 0
+                              return `Mod ${abilityLabel}: ${abilityMod >= 0 ? '+' : ''}${abilityMod}  |  B.Maitrise: ${profValue >= 0 ? '+' : ''}${profValue}  =  ${totalMod >= 0 ? '+' : ''}${totalMod}`
+                            })()}
+                          </div>
+                          
+                          {/* Ligne 3: Sélecteur de maîtrise */}
+                          <Select
+                            value={proficiency}
+                            onChange={e => form.setSkill(skill, e.target.value as 'none' | 'proficient' | 'expertise')}
+                            className="w-full max-w-[100px]"
+                          >
+                            {proficiencyOptions.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </Select>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </CardContent>
               </Card>
             )
           })}
@@ -403,7 +684,7 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
 
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <Input
             label="Points de vie max *"
             type="number"
@@ -444,7 +725,7 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
             </span>
           </div>
           <p className="text-sm text-text-muted">
-            DEX ({calculations.abilities.modifiers.dex >= 0 ? '+' : ''}{calculations.abilities.modifiers.dex}) + Divers ({c.initiative_misc_bonus >= 0 ? '+' : ''}{c.initiative_misc_bonus}) = {initiative >= 0 ? '+' : ''}{initiative} (RG-8-1-07)
+            DEX ({calculations.abilities.modifiers.dex >= 0 ? '+' : ''}{calculations.abilities.modifiers.dex}) + Divers ({c.initiative_misc_bonus >= 0 ? '+' : ''}{c.initiative_misc_bonus}) = {initiative >= 0 ? '+' : ''}{initiative}
           </p>
         </div>
       </div>
@@ -454,30 +735,49 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
   // ===== SECTION 5: DONS & MAÎTRISES D'ARMES =====
   function renderFeatsSection() {
     const c = form.character
+    const originFeats = c.origin_feats ?? []
 
     return (
       <div className="space-y-6">
-        {/* Don d'Origine */}
+        {/* Dons d'Origine */}
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-2 flex items-center justify-between">
             <h4 className="font-semibold text-text-main flex items-center gap-2">
               <Star className="h-5 w-5 text-amber-main" />
-              Don d'Origine (Historique)
+              Dons d'Origine (Historique + Espèce)
             </h4>
+            <Button variant="secondary" size="sm" onClick={() => form.addOriginFeat({ name: '', description: '', category: 'origin' })}>
+              <Plus className="h-4 w-4 mr-1" /> Ajouter un don
+            </Button>
           </CardHeader>
           <CardContent className="pt-0 space-y-3">
-            <Input
-              label="Nom du don"
-              value={c.origin_feat.name}
-              onChange={e => form.setOriginFeat({ ...c.origin_feat, name: e.target.value })}
-              placeholder="Ex: Robuste, Alerte, Magicien..."
-            />
-            <Input
-              label="Description"
-              value={c.origin_feat.description}
-              onChange={e => form.setOriginFeat({ ...c.origin_feat, description: e.target.value })}
-              placeholder="Effet du don..."
-            />
+            {originFeats.length === 0 ? (
+              <p className="text-text-muted text-center py-4">Aucun don d'origine. Les dons d'origine viennent de l'historique (1) et de l'espèce (Humain = +1).</p>
+            ) : (
+              originFeats.map((feat, index) => (
+                <div key={index} className="flex gap-3 p-3 bg-amber-main/5 border border-amber-main/20 rounded-lg">
+                  <div className="flex-1">
+                    <Input
+                      label="Nom"
+                      value={feat.name}
+                      onChange={e => form.updateOriginFeat(index, { ...feat, name: e.target.value })}
+                      placeholder="Nom du don"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Input
+                      label="Description"
+                      value={feat.description}
+                      onChange={e => form.updateOriginFeat(index, { ...feat, description: e.target.value })}
+                      placeholder="Description"
+                    />
+                  </div>
+                  <Button variant="ghost" size="sm" className="text-red-400 mt-8" onClick={() => form.removeOriginFeat(index)}>
+                    <Trash2 className="h-5 w-5" />
+                  </Button>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -577,204 +877,870 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
             )}
           </CardContent>
         </Card>
+
+        {/* Maîtrises d'Outils */}
+        <Card>
+          <CardHeader className="pb-2 flex items-center justify-between">
+            <h4 className="font-semibold text-text-main flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-amber-main" />
+              Maîtrises d'Outils
+            </h4>
+            <Button variant="secondary" size="sm" onClick={() => form.setField('tool_proficiencies', [...(c.tool_proficiencies ?? []), ''])}>
+              <Plus className="h-4 w-4 mr-1" /> Ajouter
+            </Button>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-3">
+            {(!c.tool_proficiencies || c.tool_proficiencies.length === 0) ? (
+              <p className="text-text-muted text-center py-4">Aucune maîtrise d'outil. Viennent de l'historique, de la classe ou des dons.</p>
+            ) : (
+              c.tool_proficiencies.map((tool, index) => (
+                <div key={index} className="flex gap-3 p-3 bg-amber-main/5 border border-amber-main/20 rounded-lg">
+                  <div className="flex-1">
+                    <Input
+                      label="Outil"
+                      value={tool}
+                      onChange={e => {
+                        const updated = [...(c.tool_proficiencies ?? [])]
+                        updated[index] = e.target.value
+                        form.setField('tool_proficiencies', updated)
+                      }}
+                      placeholder="Ex: Outils de voleur, Kit d'herboristerie..."
+                    />
+                  </div>
+                  <Button variant="ghost" size="sm" className="text-red-400 mt-8" onClick={() => {
+                    const updated = [...(c.tool_proficiencies ?? [])]
+                    updated.splice(index, 1)
+                    form.setField('tool_proficiencies', updated)
+                  }}>
+                    <Trash2 className="h-5 w-5" />
+                  </Button>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
-  // ===== SECTION 6: MAGIE =====
+  // ===== SECTION 6: MAGIE (Sources multiples) =====
   function renderSpellsSection() {
     const c = form.character
-    const spellcasting = calculations.spellcasting
     const isSpellcaster = c.spellcasting_ability !== 'none'
+    const proficiencyBonus = calculations.abilities.proficiencyBonus
 
-    if (!isSpellcaster) {
-      return (
-        <div className="space-y-4">
-          <Card className="border-dashed border-border-main">
-            <CardContent className="p-6 text-center">
-              <BookOpen className="h-12 w-12 text-text-dark mx-auto mb-4 opacity-50" />
-              <h4 className="font-medium text-text-main mb-2">Pas de lanceur de sorts</h4>
-              <p className="text-text-muted mb-4">
-                Sélectionnez une caractéristique d'incantation ci-dessous pour activer la section magie.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      )
+    // Sources d'incantation : principale + additionnelles
+    const allSources: SpellcastingSource[] = []
+    
+    // Source principale (classe)
+    if (isSpellcaster && c.class_name) {
+      const primarySource = createPrimarySpellcastingSource(c.class_name, c.level, c.abilities as unknown as Record<string, number>)
+      if (primarySource) {
+        // Synchroniser les sorts préparés existants
+        primarySource.preparedSpells = c.prepared_spells
+        allSources.push(primarySource)
+      }
+    }
+    
+    // Sources additionnelles (dons, race, objets)
+    allSources.push(...(c.additional_spellcasting_sources ?? []))
+
+    // Calculer les slots combinés
+    const combinedSlots = combineSpellSlots(allSources)
+
+    const handleAddFeatSource = () => {
+      if (selectedFeatForSource && selectedFeatAbility) {
+        const newSource = createFeatSpellcastingSource(
+          selectedFeatForSource.id,
+          selectedFeatAbility
+        )
+        if (newSource) {
+          form.setField('additional_spellcasting_sources', [...(c.additional_spellcasting_sources ?? []), newSource])
+        }
+      }
+      setShowAddSourceModal(false)
+      setSelectedFeatForSource(null)
     }
 
-    return (
-      <div className="space-y-6">
-        {/* Caractéristique d'incantation */}
-        <Card>
-          <CardHeader className="pb-2">
-            <h4 className="font-semibold text-text-main flex items-center gap-2">
-              <BookOpen className="h-5 w-5 text-purple-500" />
-              Configuration du Lanceur de Sorts
-            </h4>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-              <Select
-                label="Caractéristique d'incantation"
-                value={c.spellcasting_ability}
-                onChange={e => form.setField('spellcasting_ability', e.target.value as SpellcastingAbility)}
-                error={form.errors.spellcasting_ability}
-              >
-                <option value="none">Aucun (Non-lanceur)</option>
-                <option value="int">Intelligence (Magicien, Ensorceleur...)</option>
-                <option value="wis">Sagesse (Clerc, Druide, Rôdeur...)</option>
-                <option value="cha">Charisme (Barde, Paladin, Démoniste...)</option>
-                <option value="str">Force (rare)</option>
-                <option value="dex">Dextérité (rare)</option>
-                <option value="con">Constitution (rare)</option>
-              </Select>
-              {spellcasting.spellSaveDC !== null && (
-                <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-center">
-                  <div className="text-xs text-text-muted uppercase tracking-wider">DD Sorts</div>
-                  <div className="text-3xl font-bold text-purple-500 font-serif">{spellcasting.spellSaveDC}</div>
-                </div>
-              )}
-              {spellcasting.spellAttackBonus !== null && (
-                <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-center">
-                  <div className="text-xs text-text-muted uppercase tracking-wider">Attaque Magique</div>
-                  <div className="text-3xl font-bold text-text-main font-serif">
-                    {spellcasting.spellAttackBonus >= 0 ? '+' : ''}{spellcasting.spellAttackBonus}
-                  </div>
-                </div>
-              )}
-              <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-center">
-                <div className="text-xs text-text-muted uppercase tracking-wider">Sorts Préparés Max</div>
-                <div className="text-3xl font-bold text-text-main font-serif">
-                  {c.spellcasting_ability !== 'none' 
-                    ? Math.max(1, c.level + getAbilityModifier(c.abilities[c.spellcasting_ability as keyof typeof c.abilities]))
-                    : '—'}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+    const handleRemoveSource = (sourceId: string) => {
+      form.setField('additional_spellcasting_sources', (c.additional_spellcasting_sources ?? []).filter(s => s.id !== sourceId))
+    }
 
-        {/* Emplacements de sorts */}
-        <Card>
-          <CardHeader className="pb-2">
-            <h4 className="font-semibold text-text-main flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-purple-500" />
-              Emplacements de Sorts (Slots)
-            </h4>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              {Object.entries(c.spell_slots)
-                .filter(([, slot]) => slot.max > 0)
-                .map(([level, slot]) => (
-                  <div key={level} className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-center">
-                    <div className="text-xs text-text-muted uppercase tracking-wider mb-1">Niveau {level}</div>
-                    <div className="flex items-center justify-center gap-2">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={9}
-                        value={slot.max}
-                        onChange={e => form.updateSpellSlot(parseInt(level) as 1|2|3|4|5|6|7|8|9, parseInt(e.target.value) || 0, slot.current)}
-                        className="w-16 text-center"
-                      />
-                      <span className="text-text-muted">/</span>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={9}
-                        value={slot.current}
-                        onChange={e => form.updateSpellSlot(parseInt(level) as 1|2|3|4|5|6|7|8|9, slot.max, parseInt(e.target.value) || 0)}
-                        className="w-16 text-center"
-                      />
-                    </div>
-                    <div className="text-xs text-text-dark mt-1">Max / Actuels</div>
-                  </div>
-                ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Sorts Préparés */}
-        <Card>
-          <CardHeader className="pb-2 flex items-center justify-between">
-            <h4 className="font-semibold text-text-main flex items-center gap-2">
-              <BookOpen className="h-5 w-5 text-purple-500" />
-              Sorts Préparés ({c.prepared_spells.length})
-            </h4>
-            <Button variant="secondary" size="sm" onClick={() => form.addPreparedSpell({
+    const handleAddPreparedSpellToSource = (sourceId: string) => {
+      const updatedSources = (c.additional_spellcasting_sources ?? []).map(source => {
+        if (source.id === sourceId) {
+          return {
+            ...source,
+            preparedSpells: [...source.preparedSpells, {
               name: '',
               level: 1,
               casting_time: 'Action',
               components: 'V, S',
               concentration: false,
               range: '9m',
-            })}>
-              <Plus className="h-4 w-4 mr-1" /> Préparer
+            }]
+          }
+        }
+        return source
+      })
+      form.setField('additional_spellcasting_sources', updatedSources)
+    }
+
+    const handleRemovePreparedSpellFromSource = (sourceId: string, spellIndex: number) => {
+      const updatedSources = (c.additional_spellcasting_sources ?? []).map(source => {
+        if (source.id === sourceId) {
+          return {
+            ...source,
+            preparedSpells: source.preparedSpells.filter((_, i) => i !== spellIndex)
+          }
+        }
+        return source
+      })
+      form.setField('additional_spellcasting_sources', updatedSources)
+    }
+
+    const handleUpdatePreparedSpellInSource = (sourceId: string, spellIndex: number, spell: PreparedSpell) => {
+      const updatedSources = (c.additional_spellcasting_sources ?? []).map(source => {
+        if (source.id === sourceId) {
+          const updatedSpells = [...source.preparedSpells]
+          updatedSpells[spellIndex] = spell
+          return { ...source, preparedSpells: updatedSpells }
+        }
+        return source
+      })
+      form.setField('additional_spellcasting_sources', updatedSources)
+    }
+
+    // Pour la source principale, on utilise les champs existants du personnage
+    const handleUpdatePrimaryPreparedSpell = (index: number, spell: PreparedSpell) => {
+      form.updatePreparedSpell(index, spell)
+    }
+    const handleRemovePrimaryPreparedSpell = (index: number) => {
+      form.removePreparedSpell(index)
+    }
+    const handleAddPrimaryPreparedSpell = () => {
+      form.addPreparedSpell({
+        name: '',
+        level: 1,
+        casting_time: 'Action',
+        components: 'V, S',
+        concentration: false,
+        range: '9m',
+      })
+    }
+
+    return (
+      <div className="space-y-6">
+        {/* ===== CARTE 1: Sources d'incantation (Cartes empilées) ===== */}
+        <Card>
+          <CardHeader className="pb-2 flex items-center justify-between">
+            <h4 className="font-semibold text-text-main flex items-center gap-2">
+              <BookOpen className="h-5 w-5 text-purple-500" />
+              Sources d'Incantation
+            </h4>
+            <Button variant="secondary" size="sm" onClick={() => setShowAddSourceModal(true)}>
+              <PlusCircle className="h-4 w-4 mr-1" /> Ajouter une source
             </Button>
           </CardHeader>
-          <CardContent className="pt-0 space-y-3 max-h-96 overflow-y-auto">
-            {c.prepared_spells.length === 0 ? (
-              <p className="text-text-muted text-center py-4">Aucun sort préparé. Cliquez sur "Préparer" pour ajouter.</p>
-            ) : (
-              c.prepared_spells.map((spell, index) => (
-                <div key={index} className="p-3 bg-bg-surface border border-border-main rounded-lg">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3 mb-2">
-                    <Input
-                      label="Nom"
-                      value={spell.name}
-                      onChange={e => form.updatePreparedSpell(index, { ...spell, name: e.target.value })}
-                      placeholder="Nom du sort"
-                    />
-                    <Select
-                      label="Niveau"
-                      value={spell.level}
-                      onChange={e => form.updatePreparedSpell(index, { ...spell, level: parseInt(e.target.value) })}
-                    >
-                      <option value={0}>Truc (Niv. 0)</option>
-                      {[1,2,3,4,5,6,7,8,9].map(l => (
-                        <option key={l} value={l}>Niveau {l}</option>
-                      ))}
-                    </Select>
-                    <Input
-                      label="Temps d'incantation"
-                      value={spell.casting_time}
-                      onChange={e => form.updatePreparedSpell(index, { ...spell, casting_time: e.target.value })}
-                      placeholder="Action, Action Bonus, Réaction..."
-                    />
-                    <Input
-                      label="Portée"
-                      value={spell.range}
-                      onChange={e => form.updatePreparedSpell(index, { ...spell, range: e.target.value })}
-                      placeholder="9m, Contact, 36m..."
-                    />
-                    <Input
-                      label="Composantes"
-                      value={spell.components}
-                      onChange={e => form.updatePreparedSpell(index, { ...spell, components: e.target.value })}
-                      placeholder="V, S, M"
-                    />
-                    <label className="flex items-center gap-2 cursor-pointer self-end">
-                      <input
-                        type="checkbox"
-                        checked={spell.concentration}
-                        onChange={e => form.updatePreparedSpell(index, { ...spell, concentration: e.target.checked })}
-                        className="h-4 w-4 rounded border-border-main text-purple-500 focus:ring-purple-500"
-                      />
-                      <span className="text-sm text-text-muted">Concentration</span>
-                    </label>
+          <CardContent className="pt-0 space-y-4">
+            {allSources.length === 0 && !isSpellcaster && (
+              <div className="text-center py-8 text-text-muted border-2 border-dashed border-border-main rounded-lg">
+                <BookOpen className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                <p className="mb-2">Aucune source d'incantation configurée</p>
+                <p className="text-sm">Sélectionnez une classe lanceuse de sorts ou ajoutez un don magique</p>
+              </div>
+            )}
+            
+            {allSources.map((source) => (
+              <div 
+                key={source.id} 
+                className={cn(
+                  'p-4 rounded-lg border transition-all',
+                  source.type === 'class' 
+                    ? 'bg-purple-500/5 border-purple-500/30' 
+                    : source.type === 'feat'
+                    ? 'bg-amber-500/5 border-amber-500/30'
+                    : source.type === 'race'
+                    ? 'bg-green-500/5 border-green-500/30'
+                    : 'bg-blue-500/5 border-blue-500/30'
+                )}
+              >
+                {/* Header de la source */}
+                <div className="flex items-start justify-between gap-4 mb-4">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className={cn(
+                      'p-2 rounded-lg flex-shrink-0',
+                      source.type === 'class' && 'bg-purple-500/10 text-purple-500',
+                      source.type === 'feat' && 'bg-amber-500/10 text-amber-500',
+                      source.type === 'race' && 'bg-green-500/10 text-green-500',
+                      source.type === 'item' && 'bg-blue-500/10 text-blue-500'
+                    )}>
+                      {source.type === 'class' && <BookOpen className="h-5 w-5" />}
+                      {source.type === 'feat' && <Wand2 className="h-5 w-5" />}
+                      {source.type === 'race' && <Sparkles className="h-5 w-5" />}
+                      {source.type === 'item' && <Star className="h-5 w-5" />}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h5 className="font-semibold text-text-main truncate">{source.name}</h5>
+                        <Badge variant="rarity" size="sm" className={cn(
+                          source.type === 'class' && 'rarity-legendary',
+                          source.type === 'feat' && 'rarity-rare',
+                          source.type === 'race' && 'rarity-uncommon',
+                          source.type === 'item' && 'rarity-common'
+                        )}>
+                          {source.type === 'class' && 'Classe'}
+                          {source.type === 'feat' && 'Don'}
+                          {source.type === 'race' && 'Race'}
+                          {source.type === 'item' && 'Objet'}
+                        </Badge>
+                      </div>
+                      <div className="text-sm text-text-muted flex items-center gap-2 flex-wrap">
+                        <span>Carac: <strong className="text-text-main">{source.ability.toUpperCase()}</strong></span>
+                        <span>•</span>
+                        <span>Niv. lanceur: <strong className="text-text-main">{source.spellcastingLevel}</strong></span>
+                        {source.sourceDetail && (
+                          <>
+                            <span>•</span>
+                            <span className="text-text-dark">{source.sourceDetail}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-end">
-                    <Button variant="ghost" size="sm" className="text-red-400" onClick={() => form.removePreparedSpell(index)}>
-                      <Trash2 className="h-4 w-4 mr-1" /> Supprimer
+                  
+                  {/* Bouton supprimer pour sources additionnelles seulement */}
+                  {source.type !== 'class' && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-red-400 flex-shrink-0"
+                      onClick={() => handleRemoveSource(source.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </Button>
+                  )}
+                </div>
+
+                {/* Stats calculées pour cette source */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                  <div className="p-3 bg-bg-surface border border-border-main rounded-lg text-center">
+                    <div className="text-xs text-text-muted uppercase tracking-wider">DD Sorts</div>
+                    <div className="text-2xl font-bold text-purple-500 font-serif">
+                      {getSpellSaveDC(source, proficiencyBonus, c.abilities as unknown as Record<string, number>)}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-bg-surface border border-border-main rounded-lg text-center">
+                    <div className="text-xs text-text-muted uppercase tracking-wider">Attaque Magique</div>
+                    <div className="text-2xl font-bold text-text-main font-serif">
+                      {getSpellAttackBonus(source, proficiencyBonus, c.abilities as unknown as Record<string, number>) >= 0 ? '+' : ''}
+                      {getSpellAttackBonus(source, proficiencyBonus, c.abilities as unknown as Record<string, number>)}
+                    </div>
+                  </div>
+                  <div className="p-3 bg-bg-surface border border-border-main rounded-lg text-center">
+                    <div className="text-xs text-text-muted uppercase tracking-wider">Sorts Préparés Max</div>
+                    <div className="text-2xl font-bold text-text-main font-serif">
+                      {getMaxPreparedSpellsForSource(source, c.abilities as unknown as Record<string, number>)}
+                    </div>
                   </div>
                 </div>
-              ))
+
+                {/* Cantrips connus */}
+                {source.cantripsKnown > 0 && (
+                  <div className="mb-3 p-2 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Sparkles className="h-4 w-4 text-amber-500" />
+                      <span className="font-medium text-text-main">Cantrips connus: </span>
+                      <span className="font-bold text-amber-500">{source.cantripsKnown}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sorts toujours préparés (domaines, dons) */}
+                {source.alwaysPrepared && source.alwaysPrepared.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-xs text-text-muted uppercase tracking-wider mb-2">Sorts toujours préparés (gratuits)</div>
+                    <div className="flex flex-wrap gap-2">
+                      {source.alwaysPrepared.map((spell, i) => (
+                        <Badge key={i} variant="rarity" size="sm" rarity="legendary" className="gap-1">
+                          <span className="text-xs">{spell.name}</span>
+                          <span className="text-xs text-text-muted">Niv.{spell.level}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sorts accordés par le don (Magic Initiate, etc.) */}
+                {source.grantedSpells && source.grantedSpells.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-xs text-text-muted uppercase tracking-wider mb-2">Sorts accordés par le don</div>
+                    <div className="flex flex-wrap gap-2">
+                      {source.grantedSpells.map((spell, i) => (
+                        <Badge key={i} variant="rarity" size="sm" rarity="rare" className="gap-1">
+                          <span className="text-xs">{spell.name}</span>
+                          <span className="text-xs text-text-muted">Niv.{spell.level}</span>
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sorts préparés pour cette source */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h6 className="font-medium text-text-main flex items-center gap-2">
+                      <BookOpen className="h-4 w-4" />
+                      Sorts préparés ({source.preparedSpells.length} / {getMaxPreparedSpellsForSource(source, c.abilities as unknown as Record<string, number>)})
+                    </h6>
+                    <Button 
+                      variant="secondary" 
+                      size="sm" 
+                      onClick={() => source.type === 'class' ? handleAddPrimaryPreparedSpell() : handleAddPreparedSpellToSource(source.id)}
+                    >
+                      <Plus className="h-3 w-3 mr-1" /> Ajouter
+                    </Button>
+                  </div>
+
+                  {source.preparedSpells.length === 0 ? (
+                    <p className="text-text-muted text-sm text-center py-2">Aucun sort préparé pour cette source</p>
+                  ) : (
+                    source.preparedSpells.map((spell, spellIndex) => (
+                      <div key={spellIndex} className="p-3 bg-bg-surface border border-border-main rounded-lg">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3 mb-2">
+                          <SpellSelector
+                            spell={spell}
+                            source={source}
+                            characterClass={c.class_name}
+                            onChange={updatedSpell => {
+                              if (source.type === 'class') {
+                                handleUpdatePrimaryPreparedSpell(spellIndex, updatedSpell)
+                              } else {
+                                handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)
+                              }
+                            }}
+                          />
+                          <Select
+                            label="Niveau"
+                            value={spell.level}
+                            onChange={e => {
+                              const updatedSpell = { ...spell, level: parseInt(e.target.value) }
+                              if (source.type === 'class') {
+                                handleUpdatePrimaryPreparedSpell(spellIndex, updatedSpell)
+                              } else {
+                                handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)
+                              }
+                            }}
+                          >
+                            <option value={0}>Cantrip (Level 0)</option>
+                            {[1,2,3,4,5,6,7,8,9].map(l => (
+                              <option key={l} value={l}>Level {l}</option>
+                            ))}
+                          </Select>
+                          <Input
+                            label="Temps d'incantation"
+                            value={spell.casting_time}
+                            onChange={e => {
+                              const updatedSpell = { ...spell, casting_time: e.target.value }
+                              if (source.type === 'class') {
+                                handleUpdatePrimaryPreparedSpell(spellIndex, updatedSpell)
+                              } else {
+                                handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)
+                              }
+                            }}
+                            placeholder="Action, Action Bonus, Réaction..."
+                          />
+                          <Input
+                            label="Portée"
+                            value={spell.range}
+                            onChange={e => {
+                              const updatedSpell = { ...spell, range: e.target.value }
+                              if (source.type === 'class') {
+                                handleUpdatePrimaryPreparedSpell(spellIndex, updatedSpell)
+                              } else {
+                                handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)
+                              }
+                            }}
+                            placeholder="9m, Contact, 36m..."
+                          />
+                          <Input
+                            label="Composantes"
+                            value={spell.components}
+                            onChange={e => {
+                              const updatedSpell = { ...spell, components: e.target.value }
+                              if (source.type === 'class') {
+                                handleUpdatePrimaryPreparedSpell(spellIndex, updatedSpell)
+                              } else {
+                                handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)
+                              }
+                            }}
+                            placeholder="V, S, M"
+                          />
+                          <label className="flex items-center gap-2 cursor-pointer self-end">
+                            <input
+                              type="checkbox"
+                              checked={spell.concentration}
+                              onChange={e => {
+                                const updatedSpell = { ...spell, concentration: e.target.checked }
+                                if (source.type === 'class') {
+                                  handleUpdatePrimaryPreparedSpell(spellIndex, updatedSpell)
+                                } else {
+                                  handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)
+                                }
+                              }}
+                              className="h-4 w-4 rounded border-border-main text-purple-500 focus:ring-purple-500"
+                            />
+                            <span className="text-sm text-text-muted">Concentration</span>
+                          </label>
+                        </div>
+                        <div className="flex justify-end">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="text-red-400" 
+                            onClick={() => source.type === 'class' ? handleRemovePrimaryPreparedSpell(spellIndex) : handleRemovePreparedSpellFromSource(source.id, spellIndex)}
+                          >
+                            <Trash2 className="h-3 w-3 mr-1" /> Supprimer
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Message si pas de source principale mais sources additionnelles */}
+            {!isSpellcaster && allSources.length > 0 && (
+              <div className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                <div className="flex items-center gap-2 text-sm">
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  <span className="text-text-main">Vous avez des sources de sorts (dons, race) mais aucune classe lanceuse de sorts.</span>
+                </div>
+                <p className="text-text-muted text-sm mt-1">Les sorts de ces sources utilisent leurs propres caractéristiques d'incantation.</p>
+              </div>
             )}
           </CardContent>
         </Card>
+
+        {/* ===== CARTE 2: Emplacements de sorts combinés ===== */}
+        {allSources.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <h4 className="font-semibold text-text-main flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-purple-500" />
+                Emplacements de Sorts Combinés
+              </h4>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                {Object.entries(combinedSlots)
+                  .filter(([, slot]) => slot.max > 0)
+                  .map(([level, slot]) => (
+                    <div key={level} className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg text-center">
+                      <div className="text-xs text-text-muted uppercase tracking-wider mb-1">Niveau {level}</div>
+                      <div className="flex items-center justify-center gap-2">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={9}
+                          value={slot.max}
+                          onChange={e => form.updateSpellSlot(parseInt(level) as 1|2|3|4|5|6|7|8|9, parseInt(e.target.value) || 0, slot.current)}
+                          className="w-16 text-center"
+                        />
+                        <span className="text-text-muted">/</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={9}
+                          value={slot.current}
+                          onChange={e => form.updateSpellSlot(parseInt(level) as 1|2|3|4|5|6|7|8|9, slot.max, parseInt(e.target.value) || 0)}
+                          className="w-16 text-center"
+                        />
+                      </div>
+                      <div className="text-xs text-text-dark mt-1">Max / Actuels</div>
+                    </div>
+                  ))}
+              </div>
+              <p className="text-xs text-text-muted mt-3 text-center">
+                Calculés selon la table D&D 2024 (somme des niveaux de lanceur effectifs)
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ===== MODAL: Ajouter une source (4 types) ===== */}
+        {showAddSourceModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-bg-surface border border-border-main rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto">
+              <div className="p-4 border-b border-border-main flex items-center justify-between">
+                <h3 className="font-semibold text-text-main">Ajouter une source d'incantation</h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowAddSourceModal(false)}>
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-text-main mb-2">Type de source</label>
+                  <Select
+                    value={selectedFeatForSource ? 'feat' : selectedRaceForSource ? 'race' : itemSourceForm.name ? 'item' : ''}
+                    onChange={e => {
+                      const value = e.target.value
+                      if (value === 'feat') {
+                        setSelectedFeatForSource(SPELLCASTING_FEATS[0])
+                        setSelectedFeatAbility(SPELLCASTING_FEATS[0].abilityChoices[0])
+                        setShowAddRaceSourceModal(false)
+                        setShowAddItemSourceModal(false)
+                      } else if (value === 'race') {
+                        setShowAddRaceSourceModal(true)
+                        setShowAddSourceModal(false)
+                      } else if (value === 'item') {
+                        setShowAddItemSourceModal(true)
+                        setShowAddSourceModal(false)
+                      } else {
+                        setSelectedFeatForSource(null)
+                      }
+                    }}
+                  >
+                    <option value="">— Choisir —</option>
+                    <option value="feat">Don (Magic Initiate, Ritual Caster, etc.)</option>
+                    <option value="race">Race / Lignée (sorts innés PHB 2024)</option>
+                    <option value="item">Objet magique (saisie libre)</option>
+                  </Select>
+                </div>
+
+                {selectedFeatForSource && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-text-main mb-2">Don</label>
+                      <Select
+                        value={selectedFeatForSource.id}
+                        onChange={e => {
+                          const feat = SPELLCASTING_FEATS.find(f => f.id === e.target.value)
+                          if (feat) {
+                            setSelectedFeatForSource(feat)
+                            setSelectedFeatAbility(feat.abilityChoices[0])
+                          }
+                        }}
+                      >
+                        {SPELLCASTING_FEATS.map(feat => (
+                          <option key={feat.id} value={feat.id}>{feat.name}</option>
+                        ))}
+                      </Select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-text-main mb-2">Caractéristique d'incantation</label>
+                      <Select
+                        value={selectedFeatAbility}
+                        onChange={e => setSelectedFeatAbility(e.target.value as SpellcastingAbility)}
+                      >
+                        {selectedFeatForSource.abilityChoices.map(ab => (
+                          <option key={ab} value={ab}>{ab.toUpperCase()}</option>
+                        ))}
+                      </Select>
+                    </div>
+
+                    <div className="p-3 bg-bg-surface/50 border border-border-main rounded-lg text-sm">
+                      <p className="font-medium text-text-main mb-1">{selectedFeatForSource.name}</p>
+                      <p className="text-text-muted">{selectedFeatForSource.description}</p>
+                      <div className="mt-2 text-xs text-text-dark">
+                        <span>Cantrips: </span><strong>{selectedFeatForSource.grantedCantrips}</strong>
+                        <span className="ml-2">Sorts niv.1: </span><strong>{selectedFeatForSource.grantedSpellsLevel1}</strong>
+                        {selectedFeatForSource.alwaysPrepared && selectedFeatForSource.alwaysPrepared.length > 0 && (
+                          <span className="ml-2">Toujours préparés: </span>
+                        )}
+                        {selectedFeatForSource.alwaysPrepared?.map(s => <span key={s.name} className="ml-1">{s.name}</span>)}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-2">
+                      <Button variant="secondary" onClick={() => setShowAddSourceModal(false)} className="flex-1">
+                        Annuler
+                      </Button>
+                      <Button onClick={handleAddFeatSource} className="flex-1">
+                        Ajouter la source
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== MODAL: Ajouter source Race ===== */}
+        {showAddRaceSourceModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-bg-surface border border-border-main rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto">
+              <div className="p-4 border-b border-border-main flex items-center justify-between">
+                <h3 className="font-semibold text-text-main">Ajouter une source d'incantation (Race)</h3>
+                <Button variant="ghost" size="sm" onClick={() => { setShowAddRaceSourceModal(false); setShowAddSourceModal(true) }}>
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-text-main mb-2">Espèce / Lignée</label>
+                  <Select
+                    value={selectedRaceForSource}
+                    onChange={e => {
+                      setSelectedRaceForSource(e.target.value)
+                      setSelectedRaceCantrip('')
+                    }}
+                  >
+                    <option value="">— Choisir une espèce —</option>
+                    {Object.entries(RACE_SPELLCASTING_CONFIG).map(([key, config]) => (
+                      <option key={key} value={key}>
+                        {key.charAt(0).toUpperCase() + key.slice(1).replace('-', ' ')} 
+                        ({config.ability.toUpperCase()})
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                {selectedRaceForSource && RACE_SPELLCASTING_CONFIG[selectedRaceForSource]?.cantripChoice === 'sorcerer' && (
+                  <div>
+                    <label className="block text-sm font-medium text-text-main mb-2">Choisir un tour de magie (liste Sorcier)</label>
+                    <Select
+                      value={selectedRaceCantrip}
+                      onChange={e => setSelectedRaceCantrip(e.target.value)}
+                    >
+                      <option value="">— Choisir un cantrip —</option>
+                      {SRD2024_SPELLS
+                        .filter(s => s.level === 0 && s.classes?.includes('sorcerer'))
+                        .map(spell => (
+                          <option key={spell.name} value={spell.name}>{spell.name}</option>
+                        ))}
+                    </Select>
+                    <p className="text-xs text-text-muted mt-1">PHB 2024 : Haut-Elfe choisit 1 cantrip liste Sorcier</p>
+                  </div>
+                )}
+
+                {selectedRaceForSource && (
+                  <div className="p-3 bg-bg-surface/50 border border-border-main rounded-lg text-sm">
+                    <p className="font-medium text-text-main mb-1">
+                      {selectedRaceForSource.charAt(0).toUpperCase() + selectedRaceForSource.slice(1).replace('-', ' ')}
+                    </p>
+                    <p className="text-text-muted mb-2">Caractéristique: {RACE_SPELLCASTING_CONFIG[selectedRaceForSource].ability.toUpperCase()}</p>
+                    <div className="text-xs text-text-dark">
+                      <div>Cantrips: <strong>{RACE_SPELLCASTING_CONFIG[selectedRaceForSource].cantrips.join(', ') || '—'}</strong></div>
+                      <div>Sorts innés: <strong>{RACE_SPELLCASTING_CONFIG[selectedRaceForSource].spells.map(s => `${s.name} (Niv.${s.level})`).join(', ') || '—'}</strong></div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <Button variant="secondary" onClick={() => { setShowAddRaceSourceModal(false); setShowAddSourceModal(true) }} className="flex-1">
+                    Retour
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      if (selectedRaceForSource) {
+                        const newSource = createRaceSpellcastingSource(selectedRaceForSource, selectedRaceCantrip || undefined)
+                        if (newSource) {
+                          form.setField('additional_spellcasting_sources', [...(c.additional_spellcasting_sources ?? []), newSource])
+                        }
+                      }
+                      setShowAddRaceSourceModal(false)
+                      setSelectedRaceForSource('')
+                      setSelectedRaceCantrip('')
+                    }} 
+                    disabled={!selectedRaceForSource || (RACE_SPELLCASTING_CONFIG[selectedRaceForSource]?.cantripChoice === 'sorcerer' && !selectedRaceCantrip)}
+                    className="flex-1"
+                  >
+                    Ajouter la source
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== MODAL: Ajouter source Objet ===== */}
+        {showAddItemSourceModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-bg-surface border border-border-main rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto">
+              <div className="p-4 border-b border-border-main flex items-center justify-between">
+                <h3 className="font-semibold text-text-main">Ajouter une source d'incantation (Objet)</h3>
+                <Button variant="ghost" size="sm" onClick={() => { setShowAddItemSourceModal(false); setShowAddSourceModal(true) }}>
+                  <Trash2 className="h-5 w-5" />
+                </Button>
+              </div>
+              <div className="p-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-text-main mb-2">Nom de l'objet</label>
+                  <Input
+                    value={itemSourceForm.name}
+                    onChange={e => setItemSourceForm({ ...itemSourceForm, name: e.target.value })}
+                    placeholder="Ex: Bâton de feu, Anneau de protection..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-text-main mb-2">Caractéristique d'incantation</label>
+                  <Select
+                    value={itemSourceForm.ability}
+                    onChange={e => setItemSourceForm({ ...itemSourceForm, ability: e.target.value as SpellcastingAbility })}
+                  >
+                    <option value="str">FOR</option>
+                    <option value="dex">DEX</option>
+                    <option value="con">CON</option>
+                    <option value="int">INT</option>
+                    <option value="wis">SAG</option>
+                    <option value="cha">CHA</option>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <Input
+                    label="Niveau de lanceur"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={itemSourceForm.spellcastingLevel}
+                    onChange={e => setItemSourceForm({ ...itemSourceForm, spellcastingLevel: parseInt(e.target.value) || 1 })}
+                  />
+                  <Input
+                    label="Cantrips connus"
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={itemSourceForm.cantripsKnown}
+                    onChange={e => setItemSourceForm({ ...itemSourceForm, cantripsKnown: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <Input
+                    label="Charges"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={itemSourceForm.charges}
+                    onChange={e => setItemSourceForm({ ...itemSourceForm, charges: parseInt(e.target.value) || 1 })}
+                  />
+                  <Select
+                    label="Recharge"
+                    value={itemSourceForm.rechargeType}
+                    onChange={e => setItemSourceForm({ ...itemSourceForm, rechargeType: e.target.value as 'long' | 'short' | 'dawn' | 'none' })}
+                  >
+                    <option value="long">Repos long</option>
+                    <option value="short">Repos court</option>
+                    <option value="dawn">Aube</option>
+                    <option value="none">Aucune (unique)</option>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-text-main mb-2">Sorts préparés (optionnel)</label>
+                  <div className="space-y-2">
+                    {itemSourceForm.preparedSpells.map((spell, index) => (
+                      <div key={index} className="flex gap-2 p-2 bg-bg-surface/50 border border-border-main rounded-lg">
+                        <Input
+                          label="Nom"
+                          value={spell.name}
+                          onChange={e => {
+                            const updated = [...itemSourceForm.preparedSpells]
+                            updated[index] = { ...spell, name: e.target.value }
+                            setItemSourceForm({ ...itemSourceForm, preparedSpells: updated })
+                          }}
+                          placeholder="Nom du sort"
+                          className="flex-1"
+                        />
+                        <Select
+                          label="Niv."
+                          value={spell.level}
+                          onChange={e => {
+                            const updated = [...itemSourceForm.preparedSpells]
+                            updated[index] = { ...spell, level: parseInt(e.target.value) }
+                            setItemSourceForm({ ...itemSourceForm, preparedSpells: updated })
+                          }}
+                          className="w-24"
+                        >
+                          <option value={0}>Cantrip</option>
+                          {[1,2,3,4,5,6,7,8,9].map(l => <option key={l} value={l}>Level {l}</option>)}
+                        </Select>
+                        <Button variant="ghost" size="sm" className="text-red-400 mt-8" onClick={() => {
+                          const updated = itemSourceForm.preparedSpells.filter((_, i) => i !== index)
+                          setItemSourceForm({ ...itemSourceForm, preparedSpells: updated })
+                        }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button variant="secondary" size="sm" onClick={() => setItemSourceForm({ ...itemSourceForm, preparedSpells: [...itemSourceForm.preparedSpells, { name: '', level: 1, casting_time: 'Action', components: 'V, S', concentration: false, range: '9m' }] })}>
+                      <Plus className="h-3 w-3 mr-1" /> Ajouter un sort
+                    </Button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-text-main mb-2">Sorts toujours préparés (optionnel)</label>
+                  <div className="space-y-2">
+                    {itemSourceForm.alwaysPrepared?.map((spell, index) => (
+                      <div key={index} className="flex gap-2 p-2 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                        <Input
+                          label="Nom"
+                          value={spell.name}
+                          onChange={e => {
+                            const updated = [...(itemSourceForm.alwaysPrepared ?? [])]
+                            updated[index] = { ...spell, name: e.target.value }
+                            setItemSourceForm({ ...itemSourceForm, alwaysPrepared: updated })
+                          }}
+                          placeholder="Nom du sort"
+                          className="flex-1"
+                        />
+                        <Select
+                          label="Niv."
+                          value={spell.level}
+                          onChange={e => {
+                            const updated = [...(itemSourceForm.alwaysPrepared ?? [])]
+                            updated[index] = { ...spell, level: parseInt(e.target.value) }
+                            setItemSourceForm({ ...itemSourceForm, alwaysPrepared: updated })
+                          }}
+                          className="w-24"
+                        >
+                          <option value={0}>Cantrip</option>
+                          {[1,2,3,4,5,6,7,8,9].map(l => <option key={l} value={l}>Level {l}</option>)}
+                        </Select>
+                        <Button variant="ghost" size="sm" className="text-red-400 mt-8" onClick={() => {
+                          const updated = (itemSourceForm.alwaysPrepared ?? []).filter((_, i) => i !== index)
+                          setItemSourceForm({ ...itemSourceForm, alwaysPrepared: updated })
+                        }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button variant="secondary" size="sm" onClick={() => setItemSourceForm({ ...itemSourceForm, alwaysPrepared: [...(itemSourceForm.alwaysPrepared ?? []), { name: '', level: 1, casting_time: 'Action', components: 'V, S', concentration: false, range: '9m' }] })}>
+                      <Plus className="h-3 w-3 mr-1" /> Ajouter un sort toujours préparé
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <Button variant="secondary" onClick={() => { setShowAddItemSourceModal(false); setShowAddSourceModal(true) }} className="flex-1">
+                    Retour
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      if (itemSourceForm.name) {
+                        const newSource = createItemSpellcastingSource(itemSourceForm)
+                        form.setField('additional_spellcasting_sources', [...(c.additional_spellcasting_sources ?? []), newSource])
+                      }
+                      setShowAddItemSourceModal(false)
+                      setItemSourceForm({ name: '', ability: 'int', cantripsKnown: 0, preparedSpells: [], alwaysPrepared: [], charges: 1, rechargeType: 'long', spellcastingLevel: 1 })
+                    }} 
+                    disabled={!itemSourceForm.name}
+                    className="flex-1"
+                  >
+                    Ajouter la source
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -917,18 +1883,42 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
             </Card>
           )}
 
-          {/* Origin Feat */}
-          {c.origin_feat.name && (
+          {/* Origin Feats */}
+          {c.origin_feats?.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
                 <h4 className="font-semibold text-text-main flex items-center gap-2">
-                  <Star className="h-4 w-4 text-amber-main" /> Don d'Origine
+                  <Star className="h-4 w-4 text-amber-main" /> Dons d'Origine
                 </h4>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="text-sm">
-                  <span className="font-medium">{c.origin_feat.name}</span>
-                  <p className="text-text-muted mt-1">{c.origin_feat.description}</p>
+                <div className="space-y-2">
+                  {c.origin_feats.map((feat, index) => (
+                    <div key={index} className="p-3 bg-amber-main/5 border border-amber-main/20 rounded-lg">
+                      <div className="font-medium text-text-main">{feat.name}</div>
+                      <p className="text-text-muted mt-1 text-sm">{feat.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Tool Proficiencies */}
+          {c.tool_proficiencies?.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <h4 className="font-semibold text-text-main flex items-center gap-2">
+                  <Wrench className="h-4 w-4 text-amber-main" /> Maîtrises d'Outils
+                </h4>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="flex flex-wrap gap-1.5">
+                  {c.tool_proficiencies.map((tool, i) => (
+                    <Badge key={i} variant="rarity" size="sm" rarity="common">
+                      {tool}
+                    </Badge>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -988,7 +1978,7 @@ export function CharacterBuilderModal({ isOpen, onClose, initialCharacter, onSav
           <div className="w-full lg:w-2/3 flex flex-col overflow-hidden z-10">
             {/* Navigation des sections */}
             <div className="flex flex-wrap gap-1 p-3 border-b border-border-main bg-bg-surface/50">
-              {SECTIONS.map(({ id, label, icon: Icon }) => (
+              {getSections(form.character.class_name).map(({ id, label, icon: Icon }) => (
                 <Button
                   key={id}
                   variant={activeSection === id ? 'primary' : 'ghost'}

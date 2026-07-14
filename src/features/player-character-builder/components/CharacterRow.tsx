@@ -1,10 +1,11 @@
-import { Edit, Copy, Trash2, ChevronDown, ChevronUp, Sword, Shield, Heart, Zap, Sparkles } from 'lucide-react'
+import { Edit, Copy, Trash2, ChevronDown, ChevronUp, Shield, Heart, Zap, Sparkles } from 'lucide-react'
 import { Card, CardContent } from '@/shared/components/ui/Card'
 import { Button } from '@/shared/components/ui/Button'
 import { Badge } from '@/shared/components/ui/Badge'
 import type { PlayerCharacter } from '../types/character'
 import { CharacterPreview } from './CharacterPreview'
 import { useCharacterCalculations } from '../hooks/useCharacterCalculations'
+import { getClassIcon } from '../utils/classIcons'
 
 
 interface CharacterRowProps {
@@ -39,7 +40,10 @@ export function CharacterRow({
           <div className="flex-1 min-w-0 flex items-center gap-4">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-lg bg-amber-main/10 flex items-center justify-center">
-                <Sword className="h-6 w-6 text-amber-main" />
+                {(() => {
+                  const Icon = getClassIcon(character.class_name)
+                  return <Icon className="h-6 w-6 text-amber-main" />
+                })()}
               </div>
               <div>
                 <h3 className="font-semibold text-text-main truncate">{character.character_name}</h3>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { CharacterList } from './components/CharacterList'
 import { CharacterBuilderModal } from './components/builder/CharacterBuilderModal'
 import type { PlayerCharacter } from './types/character'
+import { createEmptyCharacter, migrateCharacter } from './types/character'
 
 export function PlayerCharacterPage() {
   const [characters, setCharacters] = useState<PlayerCharacter[]>([])
@@ -12,7 +13,9 @@ export function PlayerCharacterPage() {
   const loadCharacters = useCallback(async () => {
     try {
       const loaded = await window.api.storage.getCharacters()
-      setCharacters(loaded as unknown as PlayerCharacter[])
+      // Migration automatique des anciens personnages
+      const migrated = (loaded as unknown as Partial<PlayerCharacter>[]).map(migrateCharacter)
+      setCharacters(migrated)
     } catch (error) {
       console.error('Erreur chargement personnages:', error)
     }
@@ -23,7 +26,8 @@ export function PlayerCharacterPage() {
   }, [loadCharacters])
 
   const handleNewCharacter = () => {
-    setEditingCharacter(null)
+    // Force a new character reference to trigger form reset in useCharacterForm
+    setEditingCharacter(createEmptyCharacter())
     setIsModalOpen(true)
   }
 

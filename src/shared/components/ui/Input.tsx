@@ -29,21 +29,23 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             </div>
           )}
            <input
-             ref={ref}
-             id={inputId}
-             className={cn(
-               'w-full bg-bg-surface border border-border-main rounded-lg px-4 py-2.5 text-text-main placeholder-text-dark transition-all duration-200',
-               'focus:outline-none focus:ring-2 focus:ring-amber-main focus:border-amber-main',
-               'disabled:opacity-50 disabled:cursor-not-allowed',
-               error && 'border-red-500 focus:ring-red-500 focus:border-red-500',
-               iconLeft && 'pl-10',
-               iconRight && 'pr-10',
-               className
-             )}
-             aria-invalid={error ? 'true' : 'false'}
-             aria-describedby={error ? `${inputId}-error` : undefined}
-             {...props}
-           />
+              ref={ref}
+              id={inputId}
+              className={cn(
+                'w-full bg-bg-surface border border-border-main rounded-lg px-4 py-2.5 text-text-main placeholder-text-dark transition-all duration-200',
+                'focus:outline-none focus:ring-2 focus:ring-amber-main focus:border-amber-main',
+                'disabled:opacity-50 disabled:cursor-not-allowed',
+                error && 'border-red-500 focus:ring-red-500 focus:border-red-500',
+                iconLeft && 'pl-10',
+                iconRight && 'pr-10',
+                // Hide native number input spinner arrows
+                props.type === 'number' && 'appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-inner-spin-button]:m-0',
+                className
+              )}
+              aria-invalid={error ? 'true' : 'false'}
+              aria-describedby={error ? `${inputId}-error` : undefined}
+              {...props}
+            />
           {iconRight && (
             <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-text-dark">
               {iconRight}

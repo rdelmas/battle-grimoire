@@ -34,7 +34,9 @@ export interface CharacterFormActions {
   addGeneralFeat: (feat: PlayerCharacter['general_feats'][0]) => void
   removeGeneralFeat: (index: number) => void
   updateGeneralFeat: (index: number, feat: PlayerCharacter['general_feats'][0]) => void
-  setOriginFeat: (feat: PlayerCharacter['origin_feat']) => void
+  addOriginFeat: (feat: PlayerCharacter['origin_feats'][0]) => void
+  removeOriginFeat: (index: number) => void
+  updateOriginFeat: (index: number, feat: PlayerCharacter['origin_feats'][0]) => void
   addPreparedSpell: (spell: PlayerCharacter['prepared_spells'][0]) => void
   removePreparedSpell: (index: number) => void
   updatePreparedSpell: (index: number, spell: PlayerCharacter['prepared_spells'][0]) => void
@@ -209,13 +211,29 @@ export function useCharacterForm(initialCharacter?: PlayerCharacter): UseCharact
     })
   }, [])
 
-  // Don d'origine
-  const setOriginFeat = useCallback((feat: PlayerCharacter['origin_feat']) => {
+  // Dons d'origine
+  const addOriginFeat = useCallback((feat: PlayerCharacter['origin_feats'][0]) => {
     setCharacter(prev => ({
       ...prev,
-      origin_feat: feat,
+      origin_feats: [...prev.origin_feats, feat],
       updated_at: Date.now(),
     }))
+  }, [])
+
+  const removeOriginFeat = useCallback((index: number) => {
+    setCharacter(prev => ({
+      ...prev,
+      origin_feats: prev.origin_feats.filter((_, i) => i !== index),
+      updated_at: Date.now(),
+    }))
+  }, [])
+
+  const updateOriginFeat = useCallback((index: number, feat: PlayerCharacter['origin_feats'][0]) => {
+    setCharacter(prev => {
+      const updated = [...prev.origin_feats]
+      updated[index] = feat
+      return { ...prev, origin_feats: updated, updated_at: Date.now() }
+    })
   }, [])
 
   // Sorts préparés
@@ -277,7 +295,7 @@ export function useCharacterForm(initialCharacter?: PlayerCharacter): UseCharact
     const cleanedCharacter: PlayerCharacter = {
       ...character,
       weapon_masteries: character.weapon_masteries.filter(wm => wm.weapon.trim() && wm.property),
-      origin_feat: character.origin_feat.name.trim() ? character.origin_feat : { name: '', description: '' },
+      origin_feats: character.origin_feats.filter(f => f.name.trim()),
       general_feats: character.general_feats.filter(f => f.name.trim()),
       prepared_spells: character.prepared_spells.filter(s => s.name.trim()),
       updated_at: Date.now(),
@@ -337,7 +355,9 @@ export function useCharacterForm(initialCharacter?: PlayerCharacter): UseCharact
     addGeneralFeat,
     removeGeneralFeat,
     updateGeneralFeat,
-    setOriginFeat,
+    addOriginFeat,
+    removeOriginFeat,
+    updateOriginFeat,
     addPreparedSpell,
     removePreparedSpell,
     updatePreparedSpell,

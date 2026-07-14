@@ -35,6 +35,7 @@ export type SkillName =
   | 'religion'
   | 'sleight_of_hand'
   | 'stealth'
+  | 'survival'
 
 /** Mapping caractéristique -> compétences associées */
 export const SKILL_ABILITY_MAP: Record<SkillName, keyof AbilityScores> = {
@@ -55,6 +56,7 @@ export const SKILL_ABILITY_MAP: Record<SkillName, keyof AbilityScores> = {
   religion: 'int',
   sleight_of_hand: 'dex',
   stealth: 'dex',
+  survival: 'wis',
 } as const
 
 /** Maîtrises d'armes (Weapon Mastery D&D 2024) */
@@ -100,6 +102,25 @@ export interface PreparedSpell {
 /** Caractéristique d'incantation */
 export type SpellcastingAbility = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' | 'none'
 
+/** Type de progression de sorts */
+export type SpellcastingProgression = 'full' | 'half' | 'third' | 'pact' | 'none'
+
+/** Source d'incantation (classe, don, race, objet) */
+export interface SpellcastingSource {
+  id: string                    // "class-paladin", "feat-magic-initiate-druid"
+  type: 'class' | 'feat' | 'race' | 'item'
+  name: string                  // "Paladin", "Initié à la magie (Druide)"
+  ability: SpellcastingAbility  // 'cha', 'wis', 'int'...
+  spellcastingLevel: number     // niveau effectif lanceur
+  progression: SpellcastingProgression
+  cantripsKnown: number
+  preparedSpells: PreparedSpell[]  // sorts choisis
+  alwaysPrepared?: PreparedSpell[] // sorts bonus (domaines, dons)
+  grantedSpells?: PreparedSpell[]  // sorts accordés par le don (Magic Initiate = 2 sorts)
+  // Métadonnées pour l'UI
+  sourceDetail?: string         // ex: "Niveau 5", "Don: Magic Initiate"
+}
+
 /** Configuration des emplacements de sorts (niveaux 1-9) */
 export interface SpellSlots {
   '1': SpellSlotConfig
@@ -143,13 +164,16 @@ export interface PlayerCharacter {
 
   // Arsenal Tactique & Maîtrises (D&D 2024)
   weapon_masteries: WeaponMastery[]
-  origin_feat: Feat
+  origin_feats: Feat[]
   general_feats: Feat[]
+  tool_proficiencies: string[] // Maîtrises d'outils (background, classe, don...)
 
   // Module de Magie & Sorts
   spellcasting_ability: SpellcastingAbility
   spell_slots: Partial<SpellSlots> // seulement les niveaux débloqués selon classe/niveau
   prepared_spells: PreparedSpell[]
+  cantrips_known: number // nombre de tours de magie (niveau 0) connus
+  additional_spellcasting_sources: SpellcastingSource[] // sources additionnelles (dons, race, objets, multiclasse)
 
   // Métadonnées d'état
   is_dead: boolean
@@ -185,6 +209,7 @@ export const DEFAULT_SKILLS: Record<SkillName, SkillProficiency> = {
   religion: 'none',
   sleight_of_hand: 'none',
   stealth: 'none',
+  survival: 'none',
 }
 
 export const DEFAULT_SPELL_SLOTS: SpellSlots = {
@@ -200,6 +225,44 @@ export const DEFAULT_SPELL_SLOTS: SpellSlots = {
 }
 
 export const DEFAULT_SPELLCASTING_ABILITY: SpellcastingAbility = 'none'
+
+/** Migration d'un ancien personnage vers le nouveau format (sources multiples) */
+export function migrateCharacter(character: Partial<PlayerCharacter>): PlayerCharacter {
+  const now = Date.now()
+  const base = createEmptyCharacter()
+  
+  // Copier les champs existants
+  const migrated: PlayerCharacter = {
+    ...base,
+    ...character,
+    id: character.id ?? crypto.randomUUID(),
+    created_at: character.created_at ?? now,
+    updated_at: now,
+    
+    // S'assurer que les nouveaux champs existent
+    additional_spellcasting_sources: character.additional_spellcasting_sources ?? [],
+    tool_proficiencies: character.tool_proficiencies ?? [],
+    origin_feats: character.origin_feats ?? [],
+    general_feats: character.general_feats ?? [],
+    weapon_masteries: character.weapon_masteries ?? [],
+    saving_throw_proficiencies: character.saving_throw_proficiencies ?? [],
+    skills: { ...DEFAULT_SKILLS, ...character.skills },
+    abilities: { ...DEFAULT_ABILITIES, ...character.abilities },
+    spell_slots: { ...DEFAULT_SPELL_SLOTS, ...character.spell_slots },
+    prepared_spells: character.prepared_spells ?? [],
+    cantrips_known: character.cantrips_known ?? 0,
+    spellcasting_ability: character.spellcasting_ability ?? DEFAULT_SPELLCASTING_ABILITY,
+    initiative_misc_bonus: character.initiative_misc_bonus ?? 0,
+    passive_perception: character.passive_perception ?? 10,
+    is_dead: character.is_dead ?? false,
+  }
+  
+  // Migration automatique : si le personnage a des sorts préparés mais pas de source principale configurée
+  // et qu'il a une classe lanceuse de sorts, on pourrait créer la source principale
+  // (Cela se fait maintenant dans le builder via autoConfigureSpellcasting)
+  
+  return migrated
+}
 
 /** Crée un personnage par défaut vierge */
 export function createEmptyCharacter(overrides: Partial<PlayerCharacter> = {}): PlayerCharacter {
@@ -222,11 +285,14 @@ export function createEmptyCharacter(overrides: Partial<PlayerCharacter> = {}): 
     skills: { ...DEFAULT_SKILLS },
     passive_perception: 10,
     weapon_masteries: [],
-    origin_feat: { name: '', description: '' },
+    origin_feats: [],
     general_feats: [],
+    tool_proficiencies: [],
     spellcasting_ability: DEFAULT_SPELLCASTING_ABILITY,
     spell_slots: { ...DEFAULT_SPELL_SLOTS },
     prepared_spells: [],
+    cantrips_known: 0,
+    additional_spellcasting_sources: [],
     is_dead: false,
     created_at: now,
     updated_at: now,
@@ -296,6 +362,7 @@ export const ALL_SKILLS: SkillName[] = [
   'religion',
   'sleight_of_hand',
   'stealth',
+  'survival',
 ]
 
 /** Liste des 6 caractéristiques pour itération */
