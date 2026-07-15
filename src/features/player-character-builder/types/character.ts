@@ -1,5 +1,3 @@
-
-
 /** Niveau de maîtrise d'une compétence (D&D 2024) */
 export type SkillProficiency = 'none' | 'proficient' | 'expertise'
 
@@ -175,10 +173,89 @@ export interface PlayerCharacter {
   cantrips_known: number // nombre de tours de magie (niveau 0) connus
   additional_spellcasting_sources: SpellcastingSource[] // sources additionnelles (dons, race, objets, multiclasse)
 
+  // Attaques personnalisées (saisie libre, complète les attaques dérivées)
+  custom_attacks: CustomAttack[]
+
   // Métadonnées d'état
   is_dead: boolean
   created_at: number
   updated_at: number
+}
+
+/**
+ * Attaque personnalisée saisie manuellement par l'utilisateur.
+ * Sert à compléter les attaques dérivées (armes, sorts, cantrips, mains nues)
+ * pour le futur combat tracker.
+ */
+export interface CustomAttack {
+  id: string
+  name: string
+  ability: keyof AbilityScores | 'none' // caractéristique utilisée pour l'attaque ('none' = pas de modificateur)
+  bonus: number // bonus d'attaque supplémentaire (hors modif + maîtrise)
+  damage_dice: string // ex: "1d8"
+  damage_bonus: number // bonus aux dégâts
+  damage_type: DamageType
+  note?: string
+}
+
+/** Types de dégâts D&D 2024 */
+export type DamageType =
+  | 'acid'
+  | 'bludgeoning'
+  | 'cold'
+  | 'fire'
+  | 'force'
+  | 'lightning'
+  | 'necrotic'
+  | 'piercing'
+  | 'poison'
+  | 'psychic'
+  | 'radiant'
+  | 'slashing'
+  | 'thunder'
+
+/** Labels d'affichage des types de dégâts */
+export const DAMAGE_TYPE_LABELS: Record<DamageType, string> = {
+  acid: 'Acide',
+  bludgeoning: 'Contondant',
+  cold: 'Froid',
+  fire: 'Feu',
+  force: 'Force',
+  lightning: 'Foudre',
+  necrotic: 'Nécrotique',
+  piercing: 'Perçant',
+  poison: 'Poison',
+  psychic: 'Psychique',
+  radiant: 'Radiant',
+  slashing: 'Tranchant',
+  thunder: 'Tonnerre',
+}
+
+/**
+ * Option d'attaque unifiée (armes, sorts, cantrips, mains nues, personnalisée)
+ * pour le futur combat tracker.
+ */
+export interface AttackOption {
+  id: string
+  name: string
+  // 'weapon' = arme équipée (weapon_masteries)
+  // 'cantrip' = tour de magie (prepared_spells niveau 0)
+  // 'spell' = sort d'attaque (prepared_spells avec attack roll/save)
+  // 'unarmed' = attaque mains nues (classe/niveau)
+  // 'custom' = saisie libre (custom_attacks)
+  kind: 'weapon' | 'cantrip' | 'spell' | 'unarmed' | 'custom'
+  ability: keyof AbilityScores | 'none' // caractéristique de l'attaque
+  attack_bonus: number // bonus total d'attaque (modif + maîtrise + bonus)
+  damage_dice: string // ex: "1d8"
+  damage_bonus: number // bonus total aux dégâts
+  damage_type: DamageType
+  // Pour les sorts/cantrips
+  is_spell?: boolean
+  spell_level?: number
+  save_dc?: number | null // DD de sauvegarde si applicable
+  is_concentration?: boolean
+  range?: string
+  note?: string
 }
 
 /** Valeurs par défaut pour un nouveau personnage */
@@ -230,7 +307,7 @@ export const DEFAULT_SPELLCASTING_ABILITY: SpellcastingAbility = 'none'
 export function migrateCharacter(character: Partial<PlayerCharacter>): PlayerCharacter {
   const now = Date.now()
   const base = createEmptyCharacter()
-  
+
   // Copier les champs existants
   const migrated: PlayerCharacter = {
     ...base,
@@ -238,7 +315,7 @@ export function migrateCharacter(character: Partial<PlayerCharacter>): PlayerCha
     id: character.id ?? crypto.randomUUID(),
     created_at: character.created_at ?? now,
     updated_at: now,
-    
+
     // S'assurer que les nouveaux champs existent
     additional_spellcasting_sources: character.additional_spellcasting_sources ?? [],
     tool_proficiencies: character.tool_proficiencies ?? [],
@@ -255,12 +332,13 @@ export function migrateCharacter(character: Partial<PlayerCharacter>): PlayerCha
     initiative_misc_bonus: character.initiative_misc_bonus ?? 0,
     passive_perception: character.passive_perception ?? 10,
     is_dead: character.is_dead ?? false,
+    custom_attacks: character.custom_attacks ?? [],
   }
-  
+
   // Migration automatique : si le personnage a des sorts préparés mais pas de source principale configurée
   // et qu'il a une classe lanceuse de sorts, on pourrait créer la source principale
   // (Cela se fait maintenant dans le builder via autoConfigureSpellcasting)
-  
+
   return migrated
 }
 
@@ -293,6 +371,7 @@ export function createEmptyCharacter(overrides: Partial<PlayerCharacter> = {}): 
     prepared_spells: [],
     cantrips_known: 0,
     additional_spellcasting_sources: [],
+    custom_attacks: [],
     is_dead: false,
     created_at: now,
     updated_at: now,
@@ -391,3 +470,36 @@ export const WEAPON_MASTERY_LABELS: Record<WeaponMasteryProperty, string> = {
   topple: 'Topple (Renversement)',
   vex: 'Vex (Vexation)',
 }
+
+/** Liste des armes SRD 2024 (noms français) pour sélection dans le builder */
+export const WEAPON_LIST: string[] = [
+  'Arc court',
+  'Arc long',
+  'Arbalète légère',
+  'Arbalète lourde',
+  'Cimeterre',
+  'Club',
+  'Dague',
+  'Dards',
+  'Fouet',
+  'Fléau',
+  'Fronde',
+  'Gourdin',
+  'Hache de bataille',
+  'Hachette',
+  'Hallebarde',
+  'Javelot',
+  'Lance',
+  'Marteau de guerre',
+  'Marteau léger',
+  'Masse d\'armes',
+  'Massue',
+  'Morgenstern',
+  'Épée à deux mains',
+  'Épée bastarde',
+  'Épée courte',
+  'Épée longue',
+  'Pique',
+  'Serpe',
+  'Trident',
+]

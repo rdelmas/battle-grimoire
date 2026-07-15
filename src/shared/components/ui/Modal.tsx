@@ -24,8 +24,6 @@ export function Modal({
   closeOnOverlayClick = true,
   closeOnEscape = true,
 }: ModalProps) {
-  if (!isOpen) return null
-
   const sizes = {
     sm: 'max-w-md',
     md: 'max-w-lg',
@@ -95,6 +93,8 @@ export function Modal({
       </div>
     </div>
   )
+
+  if (!isOpen) return null
 
   if (typeof window === 'undefined') {
     return null

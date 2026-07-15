@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
-import type { PlayerCharacter, SkillName, AbilityScores } from '../types/character'
+import type { PlayerCharacter, SkillName, AbilityScores, CustomAttack } from '../types/character'
 import { createEmptyCharacter, getProficiencyBonus, getAbilityModifier, ALL_SKILLS, ALL_ABILITIES } from '../types/character'
 
 /** Erreurs de validation par champ */
@@ -41,6 +41,9 @@ export interface CharacterFormActions {
   removePreparedSpell: (index: number) => void
   updatePreparedSpell: (index: number, spell: PlayerCharacter['prepared_spells'][0]) => void
   updateSpellSlot: (level: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9, max: number, current: number) => void
+  addCustomAttack: (attack: CustomAttack) => void
+  removeCustomAttack: (index: number) => void
+  updateCustomAttack: (index: number, attack: CustomAttack) => void
   validate: () => boolean
   reset: (character?: PlayerCharacter) => void
   markClean: () => void
@@ -273,6 +276,31 @@ export function useCharacterForm(initialCharacter?: PlayerCharacter): UseCharact
     }))
   }, [])
 
+  // Attaques personnalisées
+  const addCustomAttack = useCallback((attack: CustomAttack) => {
+    setCharacter(prev => ({
+      ...prev,
+      custom_attacks: [...prev.custom_attacks, attack],
+      updated_at: Date.now(),
+    }))
+  }, [])
+
+  const removeCustomAttack = useCallback((index: number) => {
+    setCharacter(prev => ({
+      ...prev,
+      custom_attacks: prev.custom_attacks.filter((_, i) => i !== index),
+      updated_at: Date.now(),
+    }))
+  }, [])
+
+  const updateCustomAttack = useCallback((index: number, attack: CustomAttack) => {
+    setCharacter(prev => {
+      const updated = [...prev.custom_attacks]
+      updated[index] = attack
+      return { ...prev, custom_attacks: updated, updated_at: Date.now() }
+    })
+  }, [])
+
   // Réinitialiser le formulaire
   const reset = useCallback((newCharacter?: PlayerCharacter) => {
     setCharacter(newCharacter ?? createEmptyCharacter())
@@ -362,6 +390,9 @@ export function useCharacterForm(initialCharacter?: PlayerCharacter): UseCharact
     removePreparedSpell,
     updatePreparedSpell,
     updateSpellSlot,
+    addCustomAttack,
+    removeCustomAttack,
+    updateCustomAttack,
     validate,
     reset,
     markClean,
