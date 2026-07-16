@@ -3,7 +3,8 @@ import type {
   SpellSlots, 
   SpellcastingSource, 
   PreparedSpell,
-  SpellcastingProgression 
+  SpellcastingProgression,
+  SpellcastingMechanic 
 } from '../types/character'
 import { getAbilityModifier } from '../types/character'
 
@@ -31,12 +32,17 @@ export interface ClassSpellcastingConfig {
   ability: SpellcastingAbility
   spellcastingLevel: number  // Niveau où la magie commence (1 pour la plupart, 2 pour Paladin, 3 pour EK/AT)
   cantripsKnown?: number[]   // Cantrips connus par niveau [niv1, niv2, ...] ou nombre fixe
-  spellsPreparedFormula?: 'level+mod' | 'level+mod-min1'  // Formule D&D 2024
+  mechanic: SpellcastingMechanic  // Mécanique D&D 2024
+  maxPreparedPerLevel: number[]   // Table fixe max préparés par niveau lanceur [niv1..niv20]
+  spellbookStartingSpells?: number  // Wizard: sorts initiaux dans grimoire
+  spellbookPerLevel?: number       // Wizard: sorts gagnés par niveau
+  subclassSpellSource?: string     // ex: 'domain', 'circle', 'oath', 'conclave'
 }
 
 /**
  * Configuration de sorts pour chaque classe SRD 2024
  * Basé sur Player's Handbook 2024
+ * maxPreparedPerLevel = table fixe PHB 2024 (index = niveau lanceur effectif - 1)
  */
 export const CLASS_SPELLCASTING_CONFIG: Record<string, ClassSpellcastingConfig> = {
   // Full casters (niveau 1-9)
@@ -45,35 +51,44 @@ export const CLASS_SPELLCASTING_CONFIG: Record<string, ClassSpellcastingConfig> 
     ability: 'cha',
     spellcastingLevel: 1,
     cantripsKnown: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepared-spells-fixed',
+    maxPreparedPerLevel: [4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 15, 16, 18, 19, 19, 20, 21, 22, 22],
   },
   cleric: {
     progression: 'full',
     ability: 'wis',
     spellcastingLevel: 1,
     cantripsKnown: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepare-from-class-list',
+    maxPreparedPerLevel: [2, 3, 4, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13],
+    subclassSpellSource: 'domain',
   },
   druid: {
     progression: 'full',
     ability: 'wis',
     spellcastingLevel: 1,
     cantripsKnown: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepare-from-class-list',
+    maxPreparedPerLevel: [2, 3, 4, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13],
+    subclassSpellSource: 'circle',
   },
   sorcerer: {
     progression: 'full',
     ability: 'cha',
     spellcastingLevel: 1,
     cantripsKnown: [4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepared-spells-fixed',
+    maxPreparedPerLevel: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
   },
   wizard: {
     progression: 'full',
     ability: 'int',
     spellcastingLevel: 1,
     cantripsKnown: [3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepare-from-spellbook',
+    maxPreparedPerLevel: [4, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14],
+    spellbookStartingSpells: 6,
+    spellbookPerLevel: 2,
   },
 
   // Half casters (niveau 1-5, progression moitié)
@@ -82,14 +97,18 @@ export const CLASS_SPELLCASTING_CONFIG: Record<string, ClassSpellcastingConfig> 
     ability: 'cha',
     spellcastingLevel: 2,
     cantripsKnown: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepare-from-class-list',
+    maxPreparedPerLevel: [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11],
+    subclassSpellSource: 'oath',
   },
   ranger: {
     progression: 'half',
     ability: 'wis',
     spellcastingLevel: 1,
     cantripsKnown: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepare-from-class-list',
+    maxPreparedPerLevel: [2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11],
+    subclassSpellSource: 'conclave',
   },
 
   // Third casters (niveau 1-4, progression tiers)
@@ -98,14 +117,18 @@ export const CLASS_SPELLCASTING_CONFIG: Record<string, ClassSpellcastingConfig> 
     ability: 'int',
     spellcastingLevel: 3,  // Eldritch Knight seulement
     cantripsKnown: [0, 0, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepare-from-class-list',
+    maxPreparedPerLevel: [0, 0, 0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10],
+    subclassSpellSource: 'eldritch-knight',
   },
   rogue: {
     progression: 'third',
     ability: 'int',
     spellcastingLevel: 3,  // Arcane Trickster seulement
     cantripsKnown: [0, 0, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepare-from-class-list',
+    maxPreparedPerLevel: [0, 0, 0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10],
+    subclassSpellSource: 'arcane-trickster',
   },
 
   // Pact Magic (Warlock - mécanique unique)
@@ -114,12 +137,13 @@ export const CLASS_SPELLCASTING_CONFIG: Record<string, ClassSpellcastingConfig> 
     ability: 'cha',
     spellcastingLevel: 1,
     cantripsKnown: [2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
-    spellsPreparedFormula: 'level+mod',
+    mechanic: 'prepared-spells-fixed',
+    maxPreparedPerLevel: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15],
   },
 
   // Non-casters
-  barbarian: { progression: 'none', ability: 'none', spellcastingLevel: 0, cantripsKnown: [] },
-  monk: { progression: 'none', ability: 'none', spellcastingLevel: 0, cantripsKnown: [] },
+  barbarian: { progression: 'none', ability: 'none', spellcastingLevel: 0, cantripsKnown: [], mechanic: 'prepare-from-class-list', maxPreparedPerLevel: [] },
+  monk: { progression: 'none', ability: 'none', spellcastingLevel: 0, cantripsKnown: [], mechanic: 'prepare-from-class-list', maxPreparedPerLevel: [] },
 }
 
 /**
@@ -465,6 +489,17 @@ export function autoConfigureSpellcasting(
 }
 
 /**
+ * Calcule le max de sorts préparés pour une source selon la table PHB 2024
+ * Index = niveau lanceur effectif - 1
+ */
+export function getMaxPreparedForSource(source: SpellcastingSource): number {
+  const config = CLASS_SPELLCASTING_CONFIG[source.name.toLowerCase()]
+  if (!config || config.maxPreparedPerLevel.length === 0) return 0
+  const idx = Math.min(Math.max(source.spellcastingLevel - 1, 0), config.maxPreparedPerLevel.length - 1)
+  return config.maxPreparedPerLevel[idx] ?? 0
+}
+
+/**
  * Crée une source d'incantation principale à partir de la classe
  */
 export function createPrimarySpellcastingSource(
@@ -478,19 +513,81 @@ export function createPrimarySpellcastingSource(
   if (casterLevel === 0) return null
 
   const cantripsKnown = getCantripsKnown(classId, characterLevel)
+  const maxPrepared = config.maxPreparedPerLevel[Math.min(casterLevel - 1, config.maxPreparedPerLevel.length - 1)] ?? 0
 
-  return {
+  const base: SpellcastingSource = {
     id: `class-${classId}`,
     type: 'class',
     name: classId.charAt(0).toUpperCase() + classId.slice(1),
     ability: config.ability,
     spellcastingLevel: casterLevel,
     progression: config.progression,
+    mechanic: config.mechanic,
     cantripsKnown,
     preparedSpells: [],
+    knownCantrips: [],
     alwaysPrepared: [],
+    maxPrepared,
     sourceDetail: `Niveau ${characterLevel}`,
   }
+
+  // Wizard : initialise le grimoire avec les sorts de départ
+  if (config.mechanic === 'prepare-from-spellbook' && config.spellbookStartingSpells) {
+    base.spellbook = []
+  }
+
+  return base
+}
+
+/**
+ * Reconstruit la liste complète des sources d'incantation d'un personnage,
+ * en reproduisant exactement la logique d'agrégation de SpellsSection :
+ *  - source principale de classe (fusionnée avec sa version sauvegardée dans
+ *    additional_spellcasting_sources si elle existe, sinon on retombe sur
+ *    l'ancien champ character.prepared_spells pour la rétro-compat)
+ *  - sources additionnelles (dons, races, objets, multiclasse)
+ *
+ * Sert notamment à computeAttacks() pour lister les sorts/cantrips utilisables
+ * au combat sans dépendre du champ legacy character.prepared_spells.
+ */
+export function buildSpellcastingSources(character: PlayerCharacter): SpellcastingSource[] {
+  const sources: SpellcastingSource[] = []
+  const isSpellcaster = character.spellcasting_ability !== 'none'
+
+  if (isSpellcaster && character.class_name) {
+    const primarySource = createPrimarySpellcastingSource(
+      character.class_name,
+      character.level
+    )
+    if (primarySource) {
+      const existingPrimary = character.additional_spellcasting_sources?.find(
+        s => s.id === primarySource.id
+      )
+      if (existingPrimary) {
+        // Recalculer les champs de configuration depuis la classe + niveau courant,
+        // et ne conserver que les listes de sorts gérées par l'utilisateur.
+        sources.push({
+          ...primarySource,
+          preparedSpells: existingPrimary.preparedSpells ?? character.prepared_spells,
+          knownCantrips: existingPrimary.knownCantrips ?? [],
+          spellbook: existingPrimary.spellbook ?? [],
+          knownSpells: existingPrimary.knownSpells ?? [],
+          alwaysPrepared: existingPrimary.alwaysPrepared ?? [],
+          grantedSpells: existingPrimary.grantedSpells ?? [],
+        })
+      } else {
+        primarySource.preparedSpells = character.prepared_spells
+        sources.push(primarySource)
+      }
+    }
+  }
+
+  sources.push(
+    ...(character.additional_spellcasting_sources ?? []).filter(
+      s => s.id !== `class-${character.class_name?.toLowerCase()}`
+    )
+  )
+  return sources
 }
 
 /**
@@ -663,10 +760,13 @@ export function createFeatSpellcastingSource(
     ability: chosenAbility,
     spellcastingLevel: casterLevel,
     progression: 'none', // Les dons n'ajoutent pas de progression de slots
+    mechanic: 'prepared-spells-fixed',
     cantripsKnown: feat.grantedCantrips,
     preparedSpells: [],
+    knownCantrips: [],
     alwaysPrepared: feat.alwaysPrepared ?? [],
     grantedSpells: [], // Sera rempli par l'utilisateur via le sélecteur de sorts
+    maxPrepared: 0,
     sourceDetail: `Don: ${feat.name}`,
   }
 }
@@ -708,9 +808,12 @@ export function createRaceSpellcastingSource(
     ability: config.ability,
     spellcastingLevel: 1, // Les sorts innés sont généralement lancés au niveau 1
     progression: 'none', // Les races n'ajoutent pas de progression de slots
+    mechanic: 'prepared-spells-fixed',
     cantripsKnown: finalCantrips.length,
     preparedSpells: [],
+    knownCantrips: [],
     alwaysPrepared,
+    maxPrepared: 0,
     sourceDetail: `Race: ${species}`,
   }
 }
@@ -737,9 +840,12 @@ export function createItemSpellcastingSource(input: ItemSpellcastingInput): Spel
     ability: input.ability,
     spellcastingLevel: input.spellcastingLevel,
     progression: 'none', // Les objets n'ajoutent pas de progression de slots
+    mechanic: 'prepared-spells-fixed',
     cantripsKnown: input.cantripsKnown,
     preparedSpells: input.preparedSpells,
+    knownCantrips: [],
     alwaysPrepared: input.alwaysPrepared ?? [],
+    maxPrepared: 0,
     sourceDetail: `Objet: ${input.name} (${input.charges} charges, recharge: ${input.rechargeType})`,
   }
 }

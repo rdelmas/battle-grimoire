@@ -2,9 +2,9 @@ import { useState, useMemo } from 'react'
 import { Card, CardHeader, CardContent, Input, Select, Button, Badge } from '@/shared/components/ui'
 import { useCharacterForm } from '../../../hooks/useCharacterForm'
 import { useCharacterCalculations } from '../../../hooks/useCharacterCalculations'
-import type { PlayerCharacter, SpellcastingSource, PreparedSpell, SpellcastingAbility } from '../../../types/character'
+import type { PlayerCharacter, SpellcastingSource, PreparedSpell, SpellcastingAbility, SpellcastingMechanic } from '../../../types/character'
 import type { ItemSpellcastingInput } from '../../../utils/spellcasting'
-import { 
+import {
   createPrimarySpellcastingSource,
   createFeatSpellcastingSource,
   createRaceSpellcastingSource,
@@ -12,13 +12,14 @@ import {
   combineSpellSlots,
   getSpellSaveDC,
   getSpellAttackBonus,
-  getMaxPreparedSpellsForSource,
+  getMaxPreparedForSource,
   SPELLCASTING_FEATS,
   RACE_SPELLCASTING_CONFIG,
   type SpellcastingFeatConfig,
 } from '../../../utils/spellcasting'
+import { SRD2024_SPELLS } from '@/shared/data/srd2024-spells'
 import { SpellSelector } from '../SpellSelector'
-import { Plus, Trash2, Sparkles, Target, Wand2, BookOpen } from 'lucide-react'
+import { Plus, Trash2, Sparkles, Target, Wand2, BookOpen, Lock } from 'lucide-react'
 import { cn } from '@/shared/utils/cn'
 
 interface SpellsSectionProps {
@@ -35,11 +36,11 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
   const [showAddSourceModal, setShowAddSourceModal] = useState(false)
   const [selectedFeatForSource, setSelectedFeatForSource] = useState<SpellcastingFeatConfig | null>(null)
   const [selectedFeatAbility, setSelectedFeatAbility] = useState<SpellcastingAbility>('int')
-  
+
   const [showAddRaceSourceModal, setShowAddRaceSourceModal] = useState(false)
   const [selectedRaceForSource, setSelectedRaceForSource] = useState<string>('')
   const [selectedRaceCantrip, setSelectedRaceCantrip] = useState<string>('')
-  
+
   const [showAddItemSourceModal, setShowAddItemSourceModal] = useState(false)
   const [itemSourceForm, setItemSourceForm] = useState<ItemSpellcastingInput>({
     name: '',
@@ -55,19 +56,36 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
   // Sources d'incantation : principale + additionnelles
   const allSources = useMemo((): SpellcastingSource[] => {
     const sources: SpellcastingSource[] = []
-    
+
     if (isSpellcaster && character.class_name) {
-              const primarySource = createPrimarySpellcastingSource(
-                character.class_name, 
-                character.level
-              )
+      const primarySource = createPrimarySpellcastingSource(
+        character.class_name,
+        character.level
+      )
       if (primarySource) {
-        primarySource.preparedSpells = character.prepared_spells
-        sources.push(primarySource)
+        // Fusionner avec les données existantes du personnage
+        const existingPrimary = character.additional_spellcasting_sources?.find(s => s.id === primarySource.id)
+        if (existingPrimary) {
+          // Recalculer les champs de configuration (niveau, cantrips, max préparés, mécanique)
+          // à partir de la classe + niveau courant, et ne conserver que les listes de sorts
+          // gérées par l'utilisateur (sinon les valeurs figées à la sauvegarde restent obsolètes).
+          sources.push({
+            ...primarySource,
+            preparedSpells: existingPrimary.preparedSpells ?? character.prepared_spells,
+            knownCantrips: existingPrimary.knownCantrips ?? [],
+            spellbook: existingPrimary.spellbook ?? [],
+            knownSpells: existingPrimary.knownSpells ?? [],
+            alwaysPrepared: existingPrimary.alwaysPrepared ?? [],
+            grantedSpells: existingPrimary.grantedSpells ?? [],
+          })
+        } else {
+          primarySource.preparedSpells = character.prepared_spells
+          sources.push(primarySource)
+        }
       }
     }
-    
-    sources.push(...(character.additional_spellcasting_sources ?? []))
+
+    sources.push(...(character.additional_spellcasting_sources ?? []).filter(s => s.id !== `class-${character.class_name?.toLowerCase()}`))
     return sources
   }, [character, isSpellcaster])
 
@@ -133,66 +151,87 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
     return sourceIndex === 0 && allSources[sourceIndex]?.type === 'class'
   }
 
-  const handleAddPreparedSpellToSource = (sourceId: string) => {
-    const newSpell: PreparedSpell = {
-      name: '',
-      level: 1,
-      casting_time: 'Action',
-      components: 'V, S',
-      concentration: false,
-      range: '9m',
-      description: '',
-      isFromSRD: false,
-      srdId: undefined,
-    }
+  // --- Helpers pour manipuler les sources ---
+
+  const updateSource = (sourceId: string, updater: (s: SpellcastingSource) => SpellcastingSource) => {
     if (isPrimarySource(sourceId)) {
-      form.setField('prepared_spells', [...(character.prepared_spells ?? []), newSpell])
-      return
-    }
-    const updatedSources = (character.additional_spellcasting_sources ?? []).map(source => {
-      if (source.id === sourceId) {
-        return {
-          ...source,
-          preparedSpells: [...source.preparedSpells, newSpell]
+      // Source principale : on stocke dans additional_spellcasting_sources
+      const existing = character.additional_spellcasting_sources ?? []
+      const idx = existing.findIndex(s => s.id === sourceId)
+      if (idx >= 0) {
+        const updated = [...existing]
+        updated[idx] = updater(existing[idx])
+        form.setField('additional_spellcasting_sources', updated)
+      } else {
+        const primarySource = allSources.find(s => s.id === sourceId)
+        if (primarySource) {
+          form.setField('additional_spellcasting_sources', [...existing, updater(primarySource)])
         }
       }
-      return source
-    })
-    form.setField('additional_spellcasting_sources', updatedSources)
+    } else {
+      const updated = (character.additional_spellcasting_sources ?? []).map(s => s.id === sourceId ? updater(s) : s)
+      form.setField('additional_spellcasting_sources', updated)
+    }
   }
 
-  const handleRemovePreparedSpellFromSource = (sourceId: string, spellIndex: number) => {
-    if (isPrimarySource(sourceId)) {
-      form.setField('prepared_spells', (character.prepared_spells ?? []).filter((_, i) => i !== spellIndex))
-      return
-    }
-    const updatedSources = (character.additional_spellcasting_sources ?? []).map(source => {
-      if (source.id === sourceId) {
-        return {
-          ...source,
-          preparedSpells: source.preparedSpells.filter((_, i) => i !== spellIndex)
-        }
-      }
-      return source
-    })
-    form.setField('additional_spellcasting_sources', updatedSources)
+  // Empêche l'ajout d'un sort déjà présent (même nom, insensible à la casse)
+  const hasSpell = (list: PreparedSpell[] | undefined, name: string): boolean =>
+    (list ?? []).some(s => s.name.trim().toLowerCase() === name.trim().toLowerCase())
+
+  // --- Cantrips ---
+  const handleAddCantrip = (sourceId: string, spell: PreparedSpell) => {
+    if (hasSpell(character.additional_spellcasting_sources?.find(s => s.id === sourceId)?.knownCantrips, spell.name)) return
+    updateSource(sourceId, s => ({ ...s, knownCantrips: [...(s.knownCantrips ?? []), spell] }))
+  }
+  const handleRemoveCantrip = (sourceId: string, index: number) => {
+    updateSource(sourceId, s => ({ ...s, knownCantrips: (s.knownCantrips ?? []).filter((_, i) => i !== index) }))
   }
 
-  const handleUpdatePreparedSpellInSource = (sourceId: string, spellIndex: number, updatedSpell: PreparedSpell) => {
-    if (isPrimarySource(sourceId)) {
-      form.setField('prepared_spells', (character.prepared_spells ?? []).map((spell, i) => i === spellIndex ? updatedSpell : spell))
-      return
-    }
-    const updatedSources = (character.additional_spellcasting_sources ?? []).map(source => {
-      if (source.id === sourceId) {
-        return {
-          ...source,
-          preparedSpells: source.preparedSpells.map((spell, i) => i === spellIndex ? updatedSpell : spell)
-        }
+  // --- Wizard Grimoire ---
+  const handleAddToSpellbook = (sourceId: string, spell: PreparedSpell) => {
+    if (hasSpell(character.additional_spellcasting_sources?.find(s => s.id === sourceId)?.spellbook, spell.name)) return
+    updateSource(sourceId, s => ({ ...s, spellbook: [...(s.spellbook ?? []), spell] }))
+  }
+  const handleRemoveFromSpellbook = (sourceId: string, index: number) => {
+    updateSource(sourceId, s => {
+      const book = s.spellbook ?? []
+      const removed = book[index]
+      return {
+        ...s,
+        spellbook: book.filter((_, i) => i !== index),
+        // Retirer aussi des préparés si coché
+        preparedSpells: s.preparedSpells.filter(p => p.name !== removed?.name),
       }
-      return source
     })
-    form.setField('additional_spellcasting_sources', updatedSources)
+  }
+
+  // --- Toggle prepared (Wizard) ---
+  const handleTogglePrepared = (sourceId: string, spell: PreparedSpell, isPrepared: boolean) => {
+    updateSource(sourceId, s => {
+      if (isPrepared) {
+        return { ...s, preparedSpells: [...s.preparedSpells, spell] }
+      } else {
+        return { ...s, preparedSpells: s.preparedSpells.filter(p => p.name !== spell.name) }
+      }
+    })
+  }
+
+  // --- Known spells (Bard/Sorcerer/Warlock) ---
+  const handleAddKnownSpell = (sourceId: string, spell: PreparedSpell) => {
+    if (hasSpell(character.additional_spellcasting_sources?.find(s => s.id === sourceId)?.knownSpells, spell.name)) return
+    updateSource(sourceId, s => ({ ...s, knownSpells: [...(s.knownSpells ?? []), spell] }))
+  }
+  const handleRemoveKnownSpell = (sourceId: string, index: number) => {
+    updateSource(sourceId, s => ({ ...s, knownSpells: (s.knownSpells ?? []).filter((_, i) => i !== index) }))
+  }
+
+  // --- Prepared from class list (Cleric/Druid/Paladin/Ranger) ---
+  const handleAddPreparedSpell = (sourceId: string, spell: PreparedSpell) => {
+    if (hasSpell(character.additional_spellcasting_sources?.find(s => s.id === sourceId)?.preparedSpells, spell.name)) return
+    updateSource(sourceId, s => ({ ...s, preparedSpells: [...s.preparedSpells, spell] }))
+  }
+  const handleRemovePreparedSpell = (sourceId: string, index: number) => {
+    updateSource(sourceId, s => ({ ...s, preparedSpells: s.preparedSpells.filter((_, i) => i !== index) }))
   }
 
   if (!isSpellcaster) {
@@ -203,7 +242,7 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
             <BookOpen className="h-12 w-12 text-amber-main/50 mx-auto mb-4" />
             <h4 className="font-semibold text-text-main mb-2">Pas de capacité d'incantation</h4>
             <p className="text-text-muted">
-              Ce personnage n'a pas de capacité d'incantation configurée. 
+              Ce personnage n'a pas de capacité d'incantation configurée.
               Sélectionnez une classe lanceuse de sorts dans l'onglet Identité.
             </p>
           </CardContent>
@@ -240,9 +279,10 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
       <div className="space-y-4">
         {allSources.map((source, sourceIndex) => {
           const isPrimary = sourceIndex === 0 && source.type === 'class'
-          const maxPrepared = getMaxPreparedSpellsForSource(source, character.abilities as unknown as Record<string, number>)
+          const maxPrepared = getMaxPreparedForSource(source)
           const spellSaveDC = getSpellSaveDC(source, proficiencyBonus, character.abilities as unknown as Record<string, number>)
           const spellAttackBonus = getSpellAttackBonus(source, proficiencyBonus, character.abilities as unknown as Record<string, number>)
+          const mechanic: SpellcastingMechanic = source.mechanic
 
           return (
             <Card key={source.id} className={cn(
@@ -261,7 +301,6 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
                   <div className="flex items-center gap-2 text-sm text-text-muted">
                     <span>DD Sorts: <strong className="text-text-main">{spellSaveDC}</strong></span>
                     <span>Attaque: <strong className="text-text-main">+{spellAttackBonus}</strong></span>
-                    <span>Préparés max: <strong className="text-text-main">{maxPrepared}</strong></span>
                   </div>
                 </div>
                 {!isPrimary && (
@@ -272,185 +311,207 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
               </CardHeader>
               <CardContent className="pt-0 space-y-4">
                 {/* Cantrips connus */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-text-muted mb-1.5">Cantrips connus</label>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={10}
-                      value={source.cantripsKnown}
-                      onChange={e => {
-                        const updatedSources = [...allSources]
-                        updatedSources[sourceIndex] = { ...source, cantripsKnown: parseInt(e.target.value) || 0 }
-                        form.setField('additional_spellcasting_sources', updatedSources.filter(s => s.type !== 'class'))
-                        if (source.type === 'class') {
-                          form.setField('cantrips_known', parseInt(e.target.value) || 0)
-                        }
-                      }}
-                      className="w-full max-w-[100px]"
-                    />
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-text-muted">
+                      Cantrips ({source.knownCantrips?.length ?? 0}/{source.cantripsKnown})
+                    </label>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={(source.knownCantrips?.length ?? 0) >= source.cantripsKnown}
+                      onClick={() => handleAddCantrip(source.id, { name: '', level: 0, casting_time: 'Action', components: 'V, S', concentration: false, range: '9m', description: '', isFromSRD: false, srdId: undefined })}
+                    >
+                      <Plus className="h-4 w-4 mr-1" /> Ajouter cantrip
+                    </Button>
                   </div>
-                  {source.type !== 'class' && (
-                    <div>
-                      <label className="block text-sm font-medium text-text-muted mb-1.5">Caractéristique d'incantation</label>
-                      <Select
-                        value={source.ability}
-                        onChange={e => {
-                          const updatedSources = [...allSources]
-                          updatedSources[sourceIndex] = { ...source, ability: e.target.value as SpellcastingAbility }
-                          form.setField('additional_spellcasting_sources', updatedSources.filter(s => s.type !== 'class'))
-                        }}
-                        className="w-full max-w-[150px]"
-                      >
-                        <option value="int">Intelligence</option>
-                        <option value="wis">Sagesse</option>
-                        <option value="cha">Charisme</option>
-                      </Select>
+                  {(source.knownCantrips ?? []).length === 0 ? (
+                    <p className="text-text-muted text-center py-2 text-sm">Aucun cantrip</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {(source.knownCantrips ?? []).map((spell, i) => (
+                        <div key={i} className="p-2.5 bg-bg-surface border border-border-main rounded-lg flex items-center justify-between">
+                          <SpellSelector
+                            spell={spell}
+                            source={source}
+                            characterClass={character.class_name ?? ''}
+                            cantripOnly
+                            onChange={updated => updateSource(source.id, s => ({ ...s, knownCantrips: (s.knownCantrips ?? []).map((sp, idx) => idx === i ? updated : sp) }))}
+                            onSwitchToCustom={() => {}}
+                          />
+                          <Button variant="ghost" size="sm" className="text-red-400 ml-2" onClick={() => handleRemoveCantrip(source.id, i)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
 
-                {/* Sorts toujours préparés */}
+                {/* Couche 2 : Sorts toujours préparés (verrouillés) */}
                 {source.alwaysPrepared && source.alwaysPrepared.length > 0 && (
                   <div>
-                    <label className="block text-sm font-medium text-text-muted mb-2">Sorts toujours préparés</label>
+                    <div className="text-xs text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1">
+                      <Lock className="h-3 w-3" /> Sorts toujours préparés (verrouillés, ne comptent pas)
+                    </div>
                     <div className="flex flex-wrap gap-2">
                       {source.alwaysPrepared.map((spell, i) => (
                         <Badge key={i} variant="status" className="bg-purple-500/10 text-purple-400">
-                          {spell.name}
+                          <Lock className="h-3 w-3 mr-1" /> {spell.name} (Niv.{spell.level})
                         </Badge>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Sorts préparés */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-sm font-medium text-text-muted">Sorts Préparés ({source.preparedSpells.length}/{maxPrepared})</label>
-                    <Button 
-                      variant="secondary" 
-                      size="sm" 
-                      onClick={() => handleAddPreparedSpellToSource(source.id)}
-                      disabled={source.preparedSpells.length >= maxPrepared}
-                    >
-                      <Plus className="h-4 w-4 mr-1" /> Ajouter
-                    </Button>
-                  </div>
-                  
-                  {source.preparedSpells.length === 0 ? (
-                    <p className="text-text-muted text-center py-4">Aucun sort préparé</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {source.preparedSpells.map((spell, spellIndex) => (
-                        <div key={spellIndex} className="p-3 bg-bg-surface border border-border-main rounded-lg">
-                          {/* Sélecteur de sort : gère les 2 modes (fiche SRD lecture seule / saisie custom) */}
-                          <SpellSelector
-                            spell={spell}
-                            source={source}
-                            characterClass={character.class_name ?? ''}
-                            onChange={updatedSpell => handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)}
-                            onSwitchToCustom={() => {
-                              handleUpdatePreparedSpellInSource(source.id, spellIndex, {
-                                ...spell,
-                                name: '',
-                                level: spell.level,
-                                casting_time: 'Action',
-                                components: 'V, S',
-                                concentration: false,
-                                range: '9m',
-                                description: '',
-                                isFromSRD: false,
-                                srdId: undefined,
-                              })
-                            }}
-                          />
-
-                          {/* Champs éditables uniquement pour les sorts personnalisés (non-SRD) */}
-                          {!spell.isFromSRD && (
-                            <>
-                              {/* Ligne 2 : Niveau (1/3) + Temps (1/3) + Portée (1/3) */}
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-                                <div className="w-full">
-                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Niveau</label>
-                                  <Select
-                                    value={spell.level}
-                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, level: parseInt(e.target.value) })}
-                                    className="w-full"
-                                  >
-                                    {[0,1,2,3,4,5,6,7,8,9].map(l => (
-                                      <option key={l} value={l}>{l === 0 ? 'Cantrip' : `Niveau ${l}`}</option>
-                                    ))}
-                                  </Select>
-                                </div>
-                                <div className="w-full">
-                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Temps d'incantation</label>
-                                  <Input
-                                    value={spell.casting_time}
-                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, casting_time: e.target.value })}
-                                    placeholder="Action"
+                {/* Variant A : Wizard (spellbook) */}
+                {mechanic === 'prepare-from-spellbook' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-text-muted">
+                        Grimoire ({source.spellbook?.length ?? 0} sorts) — Préparés: {source.preparedSpells.length}/{maxPrepared}
+                      </label>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleAddToSpellbook(source.id, { name: '', level: 1, casting_time: 'Action', components: 'V, S', concentration: false, range: '9m', description: '', isFromSRD: false, srdId: undefined })}
+                      >
+                        <Plus className="h-4 w-4 mr-1" /> Ajouter au grimoire
+                      </Button>
+                    </div>
+                    {(source.spellbook ?? []).length === 0 ? (
+                      <p className="text-text-muted text-center py-4">Grimoire vide</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {(source.spellbook ?? []).map((spell, i) => {
+                          const isPrepared = source.preparedSpells.some(p => p.name === spell.name)
+                          const canCheck = isPrepared || source.preparedSpells.length < maxPrepared
+                          return (
+                            <div key={i} className="p-3 bg-bg-surface border border-border-main rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    checked={isPrepared}
+                                    disabled={!canCheck}
+                                    onChange={e => handleTogglePrepared(source.id, spell, e.target.checked)}
+                                    className="h-4 w-4 rounded border-border-main text-amber-main focus:ring-amber-main"
+                                  />
+                                  <span className={cn(
+                                    'text-xs font-medium',
+                                    isPrepared ? 'text-amber-main' : 'text-text-muted'
+                                  )}>
+                                    Préparé
+                                  </span>
+                                </label>
+                                <div className="flex-1">
+                                  <SpellSelector
+                                    spell={spell}
+                                    source={source}
+                                    characterClass={character.class_name ?? ''}
+                                    onChange={updated => updateSource(source.id, s => ({ ...s, spellbook: (s.spellbook ?? []).map((sp, idx) => idx === i ? updated : sp) }))}
+                                    onSwitchToCustom={() => {}}
                                   />
                                 </div>
-                                <div className="w-full">
-                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Portée</label>
-                                  <Input
-                                    value={spell.range}
-                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, range: e.target.value })}
-                                    placeholder="9m"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Ligne 3 : Composantes (1/2) + Concentration (1/2) */}
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                                <div className="w-full">
-                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Composantes</label>
-                                  <Input
-                                    value={spell.components}
-                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, components: e.target.value })}
-                                    placeholder="V, S"
-                                  />
-                                </div>
-                                <div className="w-full">
-                                  <label className="flex items-center gap-1.5 cursor-pointer">
-                                    <input
-                                      type="checkbox"
-                                      checked={spell.concentration}
-                                      onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, concentration: e.target.checked })}
-                                      className="h-4 w-4 rounded border-border-main text-amber-main focus:ring-amber-main mt-1.5"
-                                    />
-                                    <span className="text-sm font-medium text-text-muted">Concentration</span>
-                                  </label>
-                                </div>
-                              </div>
-
-                              {/* Ligne 4 : Description (pleine largeur) */}
-                              <div className="w-full mt-3">
-                                <label className="block text-sm font-medium text-text-muted mb-1.5">Description</label>
-                                <textarea
-                                  value={spell.description ?? ''}
-                                  onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, description: e.target.value })}
-                                  rows={3}
-                                  className="w-full px-3 py-2 bg-bg-surface border border-border-main rounded-lg text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-amber-main/50 focus:border-amber-main resize-none"
-                                  placeholder="Description du sort..."
-                                />
-                              </div>
-
-                              {/* Bouton supprimer (sorts custom : pas de bouton dans le sélecteur) */}
-                              <div className="flex justify-end mt-3">
-                                <Button variant="ghost" size="sm" className="text-red-400" onClick={() => handleRemovePreparedSpellFromSource(source.id, spellIndex)}>
+                                <Button variant="ghost" size="sm" className="text-red-400" onClick={() => handleRemoveFromSpellbook(source.id, i)}>
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
-                            </>
-                          )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
 
-                        </div>
-                      ))}
+                {/* Variant B : prepare-from-class-list (Cleric/Druid/Paladin/Ranger) */}
+                {mechanic === 'prepare-from-class-list' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-text-muted">
+                        Sorts préparés aujourd'hui ({source.preparedSpells.length}/{maxPrepared})
+                      </label>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={source.preparedSpells.length >= maxPrepared}
+                        onClick={() => handleAddPreparedSpell(source.id, { name: '', level: 1, casting_time: 'Action', components: 'V, S', concentration: false, range: '9m', description: '', isFromSRD: false, srdId: undefined })}
+                      >
+                        <Plus className="h-4 w-4 mr-1" /> Préparer un sort
+                      </Button>
                     </div>
-                  )}
-                </div>
+                    <p className="text-xs text-text-muted mb-2">⚠️ 1 seul échange de sort par Repos Long</p>
+                    {source.preparedSpells.length === 0 ? (
+                      <p className="text-text-muted text-center py-4">Aucun sort préparé</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {source.preparedSpells.map((spell, i) => (
+                          <div key={i} className="p-3 bg-bg-surface border border-border-main rounded-lg">
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1">
+                                <SpellSelector
+                                  spell={spell}
+                                  source={source}
+                                  characterClass={character.class_name ?? ''}
+                                  onChange={updated => updateSource(source.id, s => ({ ...s, preparedSpells: s.preparedSpells.map((sp, idx) => idx === i ? updated : sp) }))}
+                                  onSwitchToCustom={() => {}}
+                                />
+                              </div>
+                              <Button variant="ghost" size="sm" className="text-red-400" onClick={() => handleRemovePreparedSpell(source.id, i)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Variant C : prepared-spells-fixed (Bard/Sorcerer/Warlock) */}
+                {mechanic === 'prepared-spells-fixed' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-medium text-text-muted">
+                        Sorts connus ({(source.knownSpells ?? []).length}/{maxPrepared})
+                      </label>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={(source.knownSpells ?? []).length >= maxPrepared}
+                        onClick={() => handleAddKnownSpell(source.id, { name: '', level: 1, casting_time: 'Action', components: 'V, S', concentration: false, range: '9m', description: '', isFromSRD: false, srdId: undefined })}
+                      >
+                        <Plus className="h-4 w-4 mr-1" /> Apprendre un sort
+                      </Button>
+                    </div>
+                    <p className="text-xs text-text-muted mb-2">⚠️ Modification uniquement au Level Up</p>
+                    {(source.knownSpells ?? []).length === 0 ? (
+                      <p className="text-text-muted text-center py-4">Aucun sort connu</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {(source.knownSpells ?? []).map((spell, i) => (
+                          <div key={i} className="p-3 bg-bg-surface border border-border-main rounded-lg">
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1">
+                                <SpellSelector
+                                  spell={spell}
+                                  source={source}
+                                  characterClass={character.class_name ?? ''}
+                                  onChange={updated => updateSource(source.id, s => ({ ...s, knownSpells: (s.knownSpells ?? []).map((sp, idx) => idx === i ? updated : sp) }))}
+                                  onSwitchToCustom={() => {}}
+                                />
+                              </div>
+                              <Button variant="ghost" size="sm" className="text-red-400" onClick={() => handleRemoveKnownSpell(source.id, i)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )
@@ -527,19 +588,17 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
                   <option key={raceId} value={raceId}>{raceId.charAt(0).toUpperCase() + raceId.slice(1).replace('-', ' ')}</option>
                 ))}
               </Select>
-              {selectedRaceForSource && (
-                <>
-                  <Select
-                    label="Cantrip racial"
-                    value={selectedRaceCantrip}
-                    onChange={e => setSelectedRaceCantrip(e.target.value)}
-                  >
-                    <option value="">— Choisir un cantrip —</option>
-                    {RACE_SPELLCASTING_CONFIG[selectedRaceForSource as keyof typeof RACE_SPELLCASTING_CONFIG]?.cantrips.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </Select>
-                </>
+              {selectedRaceForSource && RACE_SPELLCASTING_CONFIG[selectedRaceForSource as keyof typeof RACE_SPELLCASTING_CONFIG]?.cantripChoice === 'sorcerer' && (
+                <Select
+                  label="Cantrip racial (liste Sorcier)"
+                  value={selectedRaceCantrip}
+                  onChange={e => setSelectedRaceCantrip(e.target.value)}
+                >
+                  <option value="">— Choisir un cantrip —</option>
+                  {SRD2024_SPELLS.filter(s => s.level === 0).map(c => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </Select>
               )}
               <div className="flex justify-end gap-2 pt-4">
                 <Button variant="secondary" onClick={() => setShowAddRaceSourceModal(false)}>Annuler</Button>

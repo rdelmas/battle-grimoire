@@ -9,22 +9,30 @@ interface SpellSelectorProps {
   characterClass: string
   onChange: (spell: PreparedSpell) => void
   onSwitchToCustom?: () => void
+  cantripOnly?: boolean
 }
 
 /**
  * Obtient tous les sorts disponibles pour une source d'incantation
- * (classe, don, race, objet)
+ * selon la mécanique D&D 2024 et le niveau du sort
  */
-function getAvailableSpellsForSource(source: SpellcastingSource, characterClass: string): typeof SRD2024_SPELLS {
+function getAvailableSpellsForSource(
+  source: SpellcastingSource,
+  characterClass: string,
+  cantripOnly: boolean
+): typeof SRD2024_SPELLS {
+  let base: typeof SRD2024_SPELLS
+
   if (source.type === 'class') {
-    return SRD2024_SPELLS.filter(spell =>
+    base = SRD2024_SPELLS.filter(spell =>
       spell.classes?.includes(characterClass.toLowerCase())
     )
+  } else {
+    base = SRD2024_SPELLS
   }
-  if (source.type === 'feat') {
-    return SRD2024_SPELLS
-  }
-  return SRD2024_SPELLS
+
+  // Filtrer par niveau : cantrips (level 0) ou sorts (level > 0)
+  return base.filter(spell => cantripOnly ? spell.level === 0 : spell.level > 0)
 }
 
 /**
@@ -38,10 +46,11 @@ export function SpellSelector({
   characterClass,
   onChange,
   onSwitchToCustom,
+  cantripOnly = false,
 }: SpellSelectorProps) {
   const availableSpells = useMemo(
-    () => getAvailableSpellsForSource(source, characterClass),
-    [source, characterClass]
+    () => getAvailableSpellsForSource(source, characterClass, cantripOnly),
+    [source, characterClass, cantripOnly]
   )
 
   const filteredSpells = useMemo(
@@ -107,7 +116,6 @@ export function SpellSelector({
             materialComponent: matchedSpell.materialComponent,
           }}
           onSwitchToCustom={handleSwitchToCustom}
-          onRemove={() => onChange({ ...spell, name: '', isFromSRD: false, srdId: undefined })}
         />
       </div>
     )

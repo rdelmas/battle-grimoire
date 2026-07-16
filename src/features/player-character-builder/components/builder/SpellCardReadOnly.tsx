@@ -6,7 +6,7 @@ import type { PreparedSpell } from '../../types/character'
 interface SpellCardReadOnlyProps {
   spell: PreparedSpell
   onSwitchToCustom: () => void
-  onRemove: () => void
+  onRemove?: () => void
 }
 
 /** Badge couleur par école de magie */
@@ -102,14 +102,16 @@ export function SpellCardReadOnly({ spell, onSwitchToCustom, onRemove }: SpellCa
           >
             <Sparkle className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="px-2.5 py-1.5 text-text-muted hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10"
-            title="Supprimer ce sort"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="px-2.5 py-1.5 text-text-muted hover:text-red-400 transition-colors rounded-lg hover:bg-red-500/10"
+              title="Supprimer ce sort"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 

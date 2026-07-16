@@ -111,6 +111,28 @@ export type SpellcastingAbility = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha' 
 /** Type de progression de sorts */
 export type SpellcastingProgression = 'full' | 'half' | 'third' | 'pact' | 'none'
 
+/**
+ * Mécanique d'incantation D&D 2024 (PHB 2024)
+ * - 'prepare-from-spellbook' : Sorcier (Wizard) — grimoire perso + sélection préparée
+ * - 'prepare-from-class-list' : Clerc, Druide, Paladin, Rodeur — préparation depuis liste classe
+ * - 'prepared-spells-fixed' : Barde, Ensorceleur, Occultiste — sorts connus fixes (table par niveau)
+ */
+export type SpellcastingMechanic =
+  | 'prepare-from-spellbook'
+  | 'prepare-from-class-list'
+  | 'prepared-spells-fixed'
+
+/** Lancements spéciaux (couche 3) : dons, races, objets — isolés visuellement */
+export interface SpecialCasting {
+  id: string
+  name: string
+  spell: PreparedSpell
+  source: 'feat' | 'race' | 'item'
+  recharge: 'long-rest' | 'short-rest' | 'dawn' | 'none'
+  uses: { max: number; current: number } // ex: 1/Long Rest
+  spellSlotCost: 0 // Ne consomme pas de slot pour le 1er lancement
+}
+
 /** Source d'incantation (classe, don, race, objet) */
 export interface SpellcastingSource {
   id: string                    // "class-paladin", "feat-magic-initiate-druid"
@@ -119,11 +141,23 @@ export interface SpellcastingSource {
   ability: SpellcastingAbility  // 'cha', 'wis', 'int'...
   spellcastingLevel: number     // niveau effectif lanceur
   progression: SpellcastingProgression
-  cantripsKnown: number
-  preparedSpells: PreparedSpell[]  // sorts choisis
-  alwaysPrepared?: PreparedSpell[] // sorts bonus (domaines, dons)
+  mechanic: SpellcastingMechanic // NOUVEAU : mécanique D&D 2024
+  cantripsKnown: number         // conservé pour compat (utilisé comme compteur affichage)
+  // Couche 1 : Sélection active (manuelle)
+  preparedSpells: PreparedSpell[]  // sorts préparés aujourd'hui (Clerc/Druide/etc) OU cochés (Wizard)
+  // SEULEMENT Wizard : grimoire personnel
+  spellbook?: PreparedSpell[]      // sorts appris (6 niv1 + 2/niv)
+  // SEULEMENT Bard/Sorcerer/Warlock : sorts connus (table fixe)
+  knownSpells?: PreparedSpell[]    // remplace preparedSpells pour ces classes
+  // Commun : Cantrips (toujours connus, jamais préparés)
+  knownCantrips: PreparedSpell[]   // REMPLACE cantripsKnown: number
+  // Couche 2 : Injections auto (verrouillées)
+  alwaysPrepared?: PreparedSpell[] // sorts sous-classe + dons/race verrouillés
+  // Couche 3 : Lancements spéciaux (isolés)
+  specialCastings?: SpecialCasting[] // dons, race, objets - 1/Long Rest
   grantedSpells?: PreparedSpell[]  // sorts accordés par le don (Magic Initiate = 2 sorts)
   // Métadonnées pour l'UI
+  maxPrepared: number           // calculé depuis table classe + spellcastingLevel
   sourceDetail?: string         // ex: "Niveau 5", "Don: Magic Initiate"
 }
 
