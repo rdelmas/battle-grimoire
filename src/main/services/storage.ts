@@ -176,13 +176,13 @@ export const storage = {
   },
 
   async get<T>(storeName: StoreName, id: string): Promise<T | undefined> {
-    const store = getStore(storeName)
-    return store.get(id as any) as T | undefined
+    const store = getStore(storeName) as Store<Record<string, T>>
+    return store.get(id) as T | undefined
   },
 
   async put<T extends { id: string }>(storeName: StoreName, entity: T): Promise<string> {
-    const store = getStore(storeName)
-    store.set(entity.id, entity as any)
+    const store = getStore(storeName) as Store<Record<string, T>>
+    store.set(entity.id, entity)
     return entity.id
   },
 

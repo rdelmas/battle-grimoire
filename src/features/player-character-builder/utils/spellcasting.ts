@@ -372,7 +372,7 @@ export function getSpellSlotsForClass(classId: string, characterLevel: number): 
       return HALF_CASTER_SLOTS[casterLevel] ?? {}
     case 'third':
       return THIRD_CASTER_SLOTS[casterLevel] ?? {}
-    case 'pact':
+    case 'pact': {
       // Pour Warlock, on retourne un format spécial
       const pactSlot = PACT_MAGIC_SLOTS[characterLevel]
       if (!pactSlot) return {}
@@ -386,6 +386,7 @@ export function getSpellSlotsForClass(classId: string, characterLevel: number): 
         }
       }
       return slots
+    }
     default:
       return {}
   }
@@ -468,8 +469,7 @@ export function autoConfigureSpellcasting(
  */
 export function createPrimarySpellcastingSource(
   classId: string,
-  characterLevel: number,
-  _abilities: Record<string, number>
+  characterLevel: number
 ): SpellcastingSource | null {
   const config = getClassSpellcastingConfig(classId)
   if (config.progression === 'none') return null

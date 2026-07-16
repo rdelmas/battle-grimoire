@@ -279,7 +279,7 @@ export function useSpellSlotsForLevel(character: PlayerCharacter, level: 1 | 2 |
   return useMemo(() => {
     const slotKey = String(level) as keyof typeof character.spell_slots
     return character.spell_slots[slotKey] ?? { max: 0, current: 0 }
-  }, [character.spell_slots, level])
+  }, [character, level])
 }
 
 /**
@@ -291,7 +291,7 @@ export function useMaxPreparedSpells(character: PlayerCharacter) {
     if (character.spellcasting_ability === 'none') return 0
     const abilityMod = getAbilityModifier(character.abilities[character.spellcasting_ability])
     return Math.max(1, character.level + abilityMod)
-  }, [character.level, character.spellcasting_ability, character.abilities])
+  }, [character])
 }
 
 /**

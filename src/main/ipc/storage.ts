@@ -12,7 +12,7 @@ export function registerStorageIPC() {
   })
 
   ipcMain.handle('storage:put', async (_event, storeName: string, entity: unknown) => {
-    return storage.put(storeName as 'characters' | 'monsters' | 'encounters' | 'settings', entity as any)
+    return storage.put(storeName as 'characters' | 'monsters' | 'encounters' | 'settings', entity as { id: string })
   })
 
   ipcMain.handle('storage:delete', async (_event, storeName: string, id: string) => {

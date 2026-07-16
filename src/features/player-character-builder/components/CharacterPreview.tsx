@@ -1,3 +1,4 @@
+import { createElement } from 'react'
 import { 
   Sparkles, Sword, BookOpen, 
   Brain, Star, Shield, Wrench, Wand2
@@ -87,12 +88,9 @@ export function CharacterPreview({ character }: CharacterPreviewProps) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="bg-bg-surface border-amber-main/30">
           <CardContent className="p-4 text-center">
-            <div className="flex items-center justify-center gap-2 mb-2">
-              {(() => {
-                const Icon = getClassIcon(character.class_name)
-                return <Icon className="h-6 w-6 text-amber-main" />
-              })()}
-            </div>
+              <div className="flex items-center justify-center gap-2 mb-2">
+                {createElement(getClassIcon(character.class_name), { className: 'h-6 w-6 text-amber-main' })}
+              </div>
             <div className="text-2xl font-bold text-text-main font-serif">{character.character_name}</div>
             <div className="text-sm text-text-muted mt-1">
               Niveau {character.level} • {character.species} {character.class_name}
@@ -310,8 +308,7 @@ export function CharacterPreview({ character }: CharacterPreviewProps) {
             if (isSpellcaster && character.class_name) {
               const primarySource = createPrimarySpellcastingSource(
                 character.class_name, 
-                character.level, 
-                character.abilities as unknown as Record<string, number>
+                character.level
               )
               if (primarySource) {
                 primarySource.preparedSpells = character.prepared_spells

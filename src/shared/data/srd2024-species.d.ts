@@ -39,7 +39,7 @@ export declare const CUSTOM_SPECIES_OPTION: {
     description: string;
     size: "Medium";
     speed: number;
-    abilityScoreIncreases: {};
+    abilityScoreIncreases: Record<string, never>;
     traits: never[];
     isCustom: boolean;
 };

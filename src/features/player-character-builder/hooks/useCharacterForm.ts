@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import type { PlayerCharacter, SkillName, AbilityScores, CustomAttack } from '../types/character'
 import { createEmptyCharacter, getProficiencyBonus, getAbilityModifier, ALL_SKILLS, ALL_ABILITIES } from '../types/character'
 
@@ -64,17 +64,8 @@ export function useCharacterForm(initialCharacter?: PlayerCharacter): UseCharact
     initialCharacter ?? createEmptyCharacter()
   )
   const [errors, setErrors] = useState<CharacterFormErrors>({})
-  const [isDirty, setIsDirty] = useState(false)
+  const [isDirty, setIsDirty] = useState(() => (initialCharacter ? false : true))
   const [isSaving, setIsSaving] = useState(false)
-
-  // Marquer comme modifié quand le personnage change
-  useEffect(() => {
-    if (initialCharacter) {
-      setIsDirty(false)
-    } else {
-      setIsDirty(true)
-    }
-  }, [character, initialCharacter])
 
   // Validation RG-8-2-01 : Champs obligatoires
   const validate = useCallback((): boolean => {
@@ -424,7 +415,7 @@ export function useCharacterFormCalculations(character: PlayerCharacter) {
       mods[skill] = 0 // placeholder
     }
     return mods
-  }, [character.skills, abilityModifiers, proficiencyBonus])
+  }, [])
 
   const savingThrowModifiers = useMemo(() => {
     const mods: Record<keyof AbilityScores, number> = {} as Record<keyof AbilityScores, number>

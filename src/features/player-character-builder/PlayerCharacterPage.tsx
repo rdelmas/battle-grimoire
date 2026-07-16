@@ -22,6 +22,8 @@ export function PlayerCharacterPage() {
   }, [])
 
   useEffect(() => {
+    // Chargement initial des personnages depuis le stockage
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadCharacters()
   }, [loadCharacters])
 

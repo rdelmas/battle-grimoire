@@ -36,6 +36,8 @@ export function AttackEditor({ isOpen, initial, onClose, onSave }: AttackEditorP
 
   useEffect(() => {
     if (isOpen) {
+      // Réinitialise le brouillon à l'ouverture de l'éditeur
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraft(initial ? { ...initial } : EMPTY)
     }
   }, [isOpen, initial])

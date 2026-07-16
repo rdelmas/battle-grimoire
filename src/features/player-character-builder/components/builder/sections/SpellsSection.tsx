@@ -57,11 +57,10 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
     const sources: SpellcastingSource[] = []
     
     if (isSpellcaster && character.class_name) {
-      const primarySource = createPrimarySpellcastingSource(
-        character.class_name, 
-        character.level, 
-        character.abilities as unknown as Record<string, number>
-      )
+              const primarySource = createPrimarySpellcastingSource(
+                character.class_name, 
+                character.level
+              )
       if (primarySource) {
         primarySource.preparedSpells = character.prepared_spells
         sources.push(primarySource)
@@ -128,19 +127,33 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
     form.setField('additional_spellcasting_sources', (character.additional_spellcasting_sources ?? []).filter(s => s.id !== sourceId))
   }
 
+  // Détecte si la source est la source principale de classe (type 'class' à l'index 0)
+  const isPrimarySource = (sourceId: string): boolean => {
+    const sourceIndex = allSources.findIndex(s => s.id === sourceId)
+    return sourceIndex === 0 && allSources[sourceIndex]?.type === 'class'
+  }
+
   const handleAddPreparedSpellToSource = (sourceId: string) => {
+    const newSpell: PreparedSpell = {
+      name: '',
+      level: 1,
+      casting_time: 'Action',
+      components: 'V, S',
+      concentration: false,
+      range: '9m',
+      description: '',
+      isFromSRD: false,
+      srdId: undefined,
+    }
+    if (isPrimarySource(sourceId)) {
+      form.setField('prepared_spells', [...(character.prepared_spells ?? []), newSpell])
+      return
+    }
     const updatedSources = (character.additional_spellcasting_sources ?? []).map(source => {
       if (source.id === sourceId) {
         return {
           ...source,
-          preparedSpells: [...source.preparedSpells, {
-            name: '',
-            level: 1,
-            casting_time: 'Action',
-            components: 'V, S',
-            concentration: false,
-            range: '9m',
-          }]
+          preparedSpells: [...source.preparedSpells, newSpell]
         }
       }
       return source
@@ -149,6 +162,10 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
   }
 
   const handleRemovePreparedSpellFromSource = (sourceId: string, spellIndex: number) => {
+    if (isPrimarySource(sourceId)) {
+      form.setField('prepared_spells', (character.prepared_spells ?? []).filter((_, i) => i !== spellIndex))
+      return
+    }
     const updatedSources = (character.additional_spellcasting_sources ?? []).map(source => {
       if (source.id === sourceId) {
         return {
@@ -162,6 +179,10 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
   }
 
   const handleUpdatePreparedSpellInSource = (sourceId: string, spellIndex: number, updatedSpell: PreparedSpell) => {
+    if (isPrimarySource(sourceId)) {
+      form.setField('prepared_spells', (character.prepared_spells ?? []).map((spell, i) => i === spellIndex ? updatedSpell : spell))
+      return
+    }
     const updatedSources = (character.additional_spellcasting_sources ?? []).map(source => {
       if (source.id === sourceId) {
         return {
@@ -324,76 +345,107 @@ export function SpellsSection({ character, form, calculations }: SpellsSectionPr
                     <div className="space-y-3">
                       {source.preparedSpells.map((spell, spellIndex) => (
                         <div key={spellIndex} className="p-3 bg-bg-surface border border-border-main rounded-lg">
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3 mb-2">
-                            <SpellSelector
-                              spell={spell}
-                              source={source}
-                              characterClass={character.class_name ?? ''}
-                              onChange={updatedSpell => handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)}
-                            />
-                            <div className="w-full">
-                              <label className="block text-sm font-medium text-text-muted mb-1.5">Niveau</label>
-                              <Select
-                                value={spell.level}
-                                onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, level: parseInt(e.target.value) })}
-                                className="w-full"
-                              >
-                                {[0,1,2,3,4,5,6,7,8,9].map(l => (
-                                  <option key={l} value={l}>{l === 0 ? 'Cantrip' : `Niveau ${l}`}</option>
-                                ))}
-                              </Select>
-                            </div>
-                            <div className="w-full">
-                              <label className="block text-sm font-medium text-text-muted mb-1.5">Temps d'incantation</label>
-                              <Input
-                                value={spell.casting_time}
-                                onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, casting_time: e.target.value })}
-                                placeholder="Action"
-                              />
-                            </div>
-                            <div className="w-full">
-                              <label className="block text-sm font-medium text-text-muted mb-1.5">Portée</label>
-                              <Input
-                                value={spell.range}
-                                onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, range: e.target.value })}
-                                placeholder="9m"
-                              />
-                            </div>
-                            <div className="w-full">
-                              <label className="block text-sm font-medium text-text-muted mb-1.5">Composantes</label>
-                              <Input
-                                value={spell.components}
-                                onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, components: e.target.value })}
-                                placeholder="V, S"
-                              />
-                            </div>
-                            <div className="w-full">
-                              <label className="flex items-center gap-1.5 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={spell.concentration}
-                                  onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, concentration: e.target.checked })}
-                                  className="h-4 w-4 rounded border-border-main text-amber-main focus:ring-amber-main mt-1.5"
+                          {/* Sélecteur de sort : gère les 2 modes (fiche SRD lecture seule / saisie custom) */}
+                          <SpellSelector
+                            spell={spell}
+                            source={source}
+                            characterClass={character.class_name ?? ''}
+                            onChange={updatedSpell => handleUpdatePreparedSpellInSource(source.id, spellIndex, updatedSpell)}
+                            onSwitchToCustom={() => {
+                              handleUpdatePreparedSpellInSource(source.id, spellIndex, {
+                                ...spell,
+                                name: '',
+                                level: spell.level,
+                                casting_time: 'Action',
+                                components: 'V, S',
+                                concentration: false,
+                                range: '9m',
+                                description: '',
+                                isFromSRD: false,
+                                srdId: undefined,
+                              })
+                            }}
+                          />
+
+                          {/* Champs éditables uniquement pour les sorts personnalisés (non-SRD) */}
+                          {!spell.isFromSRD && (
+                            <>
+                              {/* Ligne 2 : Niveau (1/3) + Temps (1/3) + Portée (1/3) */}
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                                <div className="w-full">
+                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Niveau</label>
+                                  <Select
+                                    value={spell.level}
+                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, level: parseInt(e.target.value) })}
+                                    className="w-full"
+                                  >
+                                    {[0,1,2,3,4,5,6,7,8,9].map(l => (
+                                      <option key={l} value={l}>{l === 0 ? 'Cantrip' : `Niveau ${l}`}</option>
+                                    ))}
+                                  </Select>
+                                </div>
+                                <div className="w-full">
+                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Temps d'incantation</label>
+                                  <Input
+                                    value={spell.casting_time}
+                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, casting_time: e.target.value })}
+                                    placeholder="Action"
+                                  />
+                                </div>
+                                <div className="w-full">
+                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Portée</label>
+                                  <Input
+                                    value={spell.range}
+                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, range: e.target.value })}
+                                    placeholder="9m"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Ligne 3 : Composantes (1/2) + Concentration (1/2) */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                                <div className="w-full">
+                                  <label className="block text-sm font-medium text-text-muted mb-1.5">Composantes</label>
+                                  <Input
+                                    value={spell.components}
+                                    onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, components: e.target.value })}
+                                    placeholder="V, S"
+                                  />
+                                </div>
+                                <div className="w-full">
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={spell.concentration}
+                                      onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, concentration: e.target.checked })}
+                                      className="h-4 w-4 rounded border-border-main text-amber-main focus:ring-amber-main mt-1.5"
+                                    />
+                                    <span className="text-sm font-medium text-text-muted">Concentration</span>
+                                  </label>
+                                </div>
+                              </div>
+
+                              {/* Ligne 4 : Description (pleine largeur) */}
+                              <div className="w-full mt-3">
+                                <label className="block text-sm font-medium text-text-muted mb-1.5">Description</label>
+                                <textarea
+                                  value={spell.description ?? ''}
+                                  onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, description: e.target.value })}
+                                  rows={3}
+                                  className="w-full px-3 py-2 bg-bg-surface border border-border-main rounded-lg text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-amber-main/50 focus:border-amber-main resize-none"
+                                  placeholder="Description du sort..."
                                 />
-                                <span className="text-sm font-medium text-text-muted">Concentration</span>
-                              </label>
-                            </div>
-                          </div>
-                          <div className="w-full">
-                            <label className="block text-sm font-medium text-text-muted mb-1.5">Description</label>
-                            <textarea
-                              value={spell.description}
-                              onChange={e => handleUpdatePreparedSpellInSource(source.id, spellIndex, { ...spell, description: e.target.value })}
-                              rows={3}
-                              className="w-full px-3 py-2 bg-bg-surface border border-border-main rounded-lg text-text-main placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-amber-main/50 focus:border-amber-main resize-none"
-                              placeholder="Description du sort..."
-                            />
-                          </div>
-                          <div className="flex justify-end mt-2">
-                            <Button variant="ghost" size="sm" className="text-red-400" onClick={() => handleRemovePreparedSpellFromSource(source.id, spellIndex)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                              </div>
+
+                              {/* Bouton supprimer (sorts custom : pas de bouton dans le sélecteur) */}
+                              <div className="flex justify-end mt-3">
+                                <Button variant="ghost" size="sm" className="text-red-400" onClick={() => handleRemovePreparedSpellFromSource(source.id, spellIndex)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </>
+                          )}
+
                         </div>
                       ))}
                     </div>

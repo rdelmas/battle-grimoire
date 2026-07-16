@@ -33,5 +33,5 @@ export function useCharacterAttacks(
       options
     )
     return { attacks, count: attacks.length }
-  }, [character, calculations.abilities, calculations.spellcasting, options.greatWeaponMaster, options.sharpshooter])
+  }, [character, calculations.abilities, calculations.spellcasting, options])
 }

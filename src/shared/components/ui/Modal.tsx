@@ -32,18 +32,16 @@ export function Modal({
     full: 'max-w-6xl',
   }
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape' && closeOnEscape) {
-      onClose()
-    }
-  }
-
   useEffect(() => {
-    if (typeof window !== 'undefined' && closeOnEscape) {
-      window.addEventListener('keydown', handleKeyDown)
-      return () => window.removeEventListener('keydown', handleKeyDown)
+    if (typeof window === 'undefined' || !closeOnEscape) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && closeOnEscape) {
+        onClose()
+      }
     }
-  }, [closeOnEscape])
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [closeOnEscape, onClose])
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget && closeOnOverlayClick) {

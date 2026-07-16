@@ -95,6 +95,14 @@ export interface PreparedSpell {
   concentration: boolean
   range: string
   description?: string
+  // Champs complémentaires pour sorts SRD (affichage lecture seule)
+  duration?: string
+  ritual?: boolean
+  school?: string
+  materialComponent?: string
+  // Métadonnées de provenance
+  isFromSRD?: boolean
+  srdId?: string
 }
 
 /** Caractéristique d'incantation */
